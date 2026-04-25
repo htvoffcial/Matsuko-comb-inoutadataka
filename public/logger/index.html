@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Ino Tadataka Project - Surveyor</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .data-card {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+        body {
+            background: #1a1a2e;
+            color: #e6e6e6;
+            font-family: sans-serif;
+            overflow-x: hidden;
+        }
+        .step-indicator {
+            transition: all 0.1s ease;
+        }
+        .step-active {
+            transform: scale(1.2);
+            color: #4ade80;
+        }
+    </style>
+</head>
+<body class="p-4">
+    <div class="max-w-md mx-auto">
+        <header class="mb-6 text-center">
+            <h1 class="text-2xl font-bold text-blue-400">松高コン部：伊能プロジェクト</h1>
+            <p class="text-xs opacity-70">歩行測量データコレクター v1.0</p>
+        </header>
+
+        <!-- リアルタイムモニター -->
+        <div class="grid grid-cols-2 gap-4 mb-6">
+            <div class="data-card p-4 rounded-xl text-center">
+                <div class="text-xs uppercase opacity-60">方向 (Heading)</div>
+                <div id="val-heading" class="text-2xl font-mono">0°</div>
+            </div>
+            <div class="data-card p-4 rounded-xl text-center">
+                <div class="text-xs uppercase opacity-60">傾斜 (Pitch)</div>
+                <div id="val-pitch" class="text-2xl font-mono">0°</div>
+            </div>
+            <div class="data-card p-4 rounded-xl text-center">
+                <div class="text-xs uppercase opacity-60 text-green-400">歩数 (Steps)</div>
+                <div id="val-steps" class="text-2xl font-mono">0</div>
+            </div>
+            <div class="data-card p-4 rounded-xl text-center">
+                <div class="text-xs uppercase opacity-60 text-blue-400">推定距離</div>
+                <div id="val-distance" class="text-2xl font-mono">0m</div>
+            </div>
+        </div>
+
+        <!-- グラフ簡易表示用 (標高イメージ) -->
+        <div class="data-card p-2 rounded-xl mb-6 h-24 flex items-end justify-center gap-1 overflow-hidden" id="mini-graph">
+            <!-- 棒グラフがここに入る -->
+        </div>
+
+        <!-- コントロール -->
+        <div class="flex flex-col gap-4">
+            <button id="btn-request" class="bg-yellow-600 hover:bg-yellow-500 p-4 rounded-xl font-bold transition">
+                センサー許可を取得
+            </button>
+
+            <div class="flex gap-2">
+                <button id="btn-start" class="flex-1 bg-green-600 hover:bg-green-500 p-4 rounded-xl font-bold transition hidden">
+                    記録開始
+                </button>
+                <button id="btn-stop" class="flex-1 bg-red-600 hover:bg-red-500 p-4 rounded-xl font-bold transition hidden">
+                    停止
+                </button>
+            </div>
+
+            <div class="flex gap-2">
+                <button id="btn-export" class="flex-1 border border-blue-500 text-blue-400 p-2 rounded-lg text-sm">
+                    データをコピー
+                </button>
+                <button id="btn-clear" class="flex-1 border border-gray-500 text-gray-400 p-2 rounded-lg text-sm">
+                    クリア
+                </button>
+            </div>
+        </div>
+
+        <!-- ログ表示 -->
+        <div class="mt-8">
+            <h2 class="text-sm font-bold mb-2 opacity-60">直近のログ (LocalStorage)</h2>
+            <div id="log-display" class="text-[10px] font-mono bg-black p-2 rounded h-32 overflow-y-auto opacity-80">
+                記録を開始してください...
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let isRecording = false;
+        let stepCount = 0;
+        let totalDistance = 0;
+        let strideLength = 0.65; // 歩幅(m) - 設定で変更可能にすると良い
+        let logs = JSON.parse(localStorage.getItem('survey_logs') || '[]');
+
+        let currentHeading = 0;
+        let currentPitch = 0;
+        let lastAccel = 0;
+        let stepThreshold = 12; // 歩法検知のしきい値
+        let lastStepTime = 0;
+
+        const btnRequest = document.getElementById('btn-request');
+        const btnStart = document.getElementById('btn-start');
+        const btnStop = document.getElementById('btn-stop');
+        const logDisplay = document.getElementById('log-display');
+
+        // iOSのセンサー許可対応
+        btnRequest.onclick = async () => {
+            if (typeof DeviceOrientationEvent.requestPermission === 'function') {
+                const permission = await DeviceOrientationEvent.requestPermission();
+                if (permission === 'granted') {
+                    initSensors();
+                }
+            } else {
+                initSensors();
+            }
+            btnRequest.classList.add('hidden');
+            btnStart.classList.remove('hidden');
+        };
+
+        function initSensors() {
+            // 方向と傾斜
+            window.addEventListener('deviceorientation', (e) => {
+                // webkitCompassHeadingはiOS用、alphaはAndroid用(補正が必要な場合あり)
+                currentHeading = e.webkitCompassHeading || (360 - e.alpha);
+                currentPitch = e.beta; // 前後の傾き
+
+                document.getElementById('val-heading').innerText = Math.round(currentHeading) + '°';
+                document.getElementById('val-pitch').innerText = Math.round(currentPitch) + '°';
+            });
+
+            // 歩数検知（加速度センサー）
+            window.addEventListener('devicemotion', (e) => {
+                const acc = e.accelerationIncludingGravity;
+                if (!acc) return;
+
+                // 3軸の合成加速度
+                const totalAcc = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2);
+                const delta = totalAcc - lastAccel;
+                lastAccel = totalAcc;
+
+                const now = Date.now();
+                // 単純なピーク検知による歩数カウント
+                if (totalAcc > stepThreshold && (now - lastStepTime) > 300) {
+                    onStepDetected();
+                    lastStepTime = now;
+                }
+            });
+        }
+
+        function onStepDetected() {
+            stepCount++;
+            totalDistance = stepCount * strideLength;
+            
+            document.getElementById('val-steps').innerText = stepCount;
+            document.getElementById('val-distance').innerText = totalDistance.toFixed(1) + 'm';
+
+            // 記録中の場合は保存
+            if (isRecording) {
+                const record = {
+                    t: Date.now(),
+                    s: stepCount,
+                    d: parseFloat(totalDistance.toFixed(2)),
+                    h: Math.round(currentHeading),
+                    p: Math.round(currentPitch)
+                };
+                logs.push(record);
+                saveLogs();
+                updateLogDisplay();
+                addGraphPoint(currentPitch);
+            }
+
+            // 視覚的フィードバック
+            document.getElementById('val-steps').classList.add('step-active');
+            setTimeout(() => document.getElementById('val-steps').classList.remove('step-active'), 100);
+        }
+
+        function saveLogs() {
+            localStorage.setItem('survey_logs', JSON.stringify(logs));
+        }
+
+        function updateLogDisplay() {
+            const lastLogs = logs.slice(-5).reverse();
+            logDisplay.innerHTML = lastLogs.map(l => 
+                `[${new Date(l.t).toLocaleTimeString()}] Dist:${l.d}m Dir:${l.h}° Pitch:${l.p}°`
+            ).join('<br>');
+        }
+
+        function addGraphPoint(pitch) {
+            const bar = document.createElement('div');
+            bar.className = 'bg-blue-500 w-1';
+            // 傾斜を高さに反映 (0度を中央に)
+            const height = 50 + (pitch * 2);
+            bar.style.height = Math.max(5, Math.min(100, height)) + '%';
+            const graph = document.getElementById('mini-graph');
+            graph.appendChild(bar);
+            if (graph.children.length > 30) graph.removeChild(graph.firstChild);
+        }
+
+        btnStart.onclick = () => {
+            isRecording = true;
+            btnStart.classList.add('hidden');
+            btnStop.classList.remove('hidden');
+            addLogMessage("--- 記録開始 ---");
+        };
+
+        btnStop.onclick = () => {
+            isRecording = false;
+            btnStop.classList.add('hidden');
+            btnStart.classList.remove('hidden');
+            addLogMessage("--- 記録停止 ---");
+        };
+
+        function addLogMessage(msg) {
+            const div = document.createElement('div');
+            div.innerText = msg;
+            div.className = "text-yellow-400 py-1";
+            logDisplay.prepend(div);
+        }
+
+        document.getElementById('btn-export').onclick = () => {
+            const dataStr = JSON.stringify(logs, null, 2);
+            // 簡易的なクリップボードコピー (iframe内では動かない場合があるため、表示もする)
+            const tempTextArea = document.createElement('textarea');
+            tempTextArea.value = dataStr;
+            document.body.appendChild(tempTextArea);
+            tempTextArea.select();
+            try {
+                document.execCommand('copy');
+                alert("データをクリップボードにコピーしました！(" + logs.length + "件)");
+            } catch (e) {
+                console.log(dataStr);
+                alert("コピーに失敗しました。コンソールを確認してください。");
+            }
+            document.body.removeChild(tempTextArea);
+        };
+
+        document.getElementById('btn-clear').onclick = () => {
+            if (confirm("データを全消去しますか？")) {
+                logs = [];
+                saveLogs();
+                stepCount = 0;
+                totalDistance = 0;
+                document.getElementById('val-steps').innerText = "0";
+                document.getElementById('val-distance').innerText = "0m";
+                logDisplay.innerHTML = "クリアされました";
+                document.getElementById('mini-graph').innerHTML = "";
+            }
+        };
+
+        // 初期ログ表示
+        updateLogDisplay();
+    </script>
+</body>
+</html>
