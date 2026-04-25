@@ -75,7 +75,7 @@
 
             <div class="flex gap-2">
                 <button id="btn-export" class="flex-1 border border-blue-500 text-blue-400 p-2 rounded-lg text-sm">
-                    データをコピー
+                    JSONを保存
                 </button>
                 <button id="btn-clear" class="flex-1 border border-gray-500 text-gray-400 p-2 rounded-lg text-sm">
                     クリア
@@ -226,19 +226,24 @@
 
         document.getElementById('btn-export').onclick = () => {
             const dataStr = JSON.stringify(logs, null, 2);
-            // 簡易的なクリップボードコピー (iframe内では動かない場合があるため、表示もする)
-            const tempTextArea = document.createElement('textarea');
-            tempTextArea.value = dataStr;
-            document.body.appendChild(tempTextArea);
-            tempTextArea.select();
-            try {
-                document.execCommand('copy');
-                alert("データをクリップボードにコピーしました！(" + logs.length + "件)");
-            } catch (e) {
-                console.log(dataStr);
-                alert("コピーに失敗しました。コンソールを確認してください。");
-            }
-            document.body.removeChild(tempTextArea);
+
+            const now = new Date();
+            const pad = (n) => String(n).padStart(2, '0');
+            const fileName =
+                `survey_logs_${now.getFullYear()}-${pad(now.getMonth()+1)}-${pad(now.getDate())}_` +
+                `${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.json`;
+
+            const blob = new Blob([dataStr], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = fileName;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+
+            URL.revokeObjectURL(url);
         };
 
         document.getElementById('btn-clear').onclick = () => {
