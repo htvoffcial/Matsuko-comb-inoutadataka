@@ -3,90 +3,108 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Ino Project - File Viewer</title>
+    <title>Ino Project - Advanced Viewer</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        body { background: #0f172a; color: #f1f5f9; font-family: sans-serif; }
-        canvas { background: #1e293b; border-radius: 12px; }
+        body { background: #f8fafc; color: #1e293b; font-family: 'Helvetica Neue', Arial, sans-serif; }
+        .canvas-container {
+            background: #ffffff;
+            border-radius: 16px;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+            position: relative;
+            overflow: hidden;
+            border: 1px solid #e2e8f0;
+        }
+        canvas { touch-action: none; display: block; width: 100%; height: 100%; }
         .drop-zone {
-            border: 2px dashed #334155;
-            transition: all 0.3s ease;
+            border: 2px dashed #cbd5e1;
+            transition: all 0.2s ease;
+            background: #ffffff;
         }
         .drop-zone.drag-over {
             border-color: #3b82f6;
-            background: rgba(59, 130, 246, 0.1);
+            background: #eff6ff;
+        }
+        .control-panel {
+            background: rgba(255, 255, 255, 0.8);
+            backdrop-filter: blur(8px);
         }
     </style>
 </head>
-<body class="p-4 md:p-8">
+<body class="p-4 md:p-6">
     <div class="max-w-6xl mx-auto">
-        <header class="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
+        <header class="mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
-                <h1 class="text-3xl font-bold text-blue-400">伊能忠敬軌跡ビューアー <span class="text-sm font-normal text-slate-500 ml-2">v2.0 (File Ready)</span></h1>
-                <p class="text-sm opacity-70">計測アプリから出力されたJSONファイルを読み込みます</p>
+                <h1 class="text-3xl font-extrabold text-slate-800 tracking-tight">伊能忠敬プロジェクト <span class="text-blue-600">Viewer Pro</span></h1>
+                <p class="text-sm text-slate-500 font-medium">松高コン部：歩行測量データの可視化システム</p>
             </div>
             
-            <div id="drop-area" class="drop-zone p-4 rounded-xl flex flex-col items-center justify-center cursor-pointer min-w-[300px]">
+            <div id="drop-area" class="drop-zone px-6 py-4 rounded-2xl flex items-center gap-4 cursor-pointer shadow-sm hover:shadow-md">
                 <input type="file" id="file-input" accept=".json" class="hidden">
-                <p class="text-sm text-slate-400" id="file-label">JSONファイルをアップロード、またはドロップ</p>
-                <button class="mt-2 text-xs bg-slate-700 hover:bg-slate-600 px-3 py-1 rounded">ファイルを選択</button>
+                <div class="bg-blue-100 p-2 rounded-full">
+                    <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d=" household-upload" />
+                        <path d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                    </svg>
+                </div>
+                <div>
+                    <p class="text-sm font-bold text-slate-700" id="file-label">JSONをドロップして解析</p>
+                    <p class="text-[10px] text-slate-400">またはクリックしてファイルを選択</p>
+                </div>
             </div>
         </header>
 
-        <div class="grid grid-cols-1 lg:grid-cols-4 gap-8">
-            <!-- Sidebar: Stats and Info -->
-            <div class="lg:col-span-1 space-y-6">
-                <div class="bg-slate-800 p-6 rounded-2xl border border-slate-700 shadow-xl">
-                    <h2 class="text-xs uppercase tracking-widest text-blue-400 font-bold mb-4">測量ステータス</h2>
-                    <div class="space-y-6">
-                        <div>
-                            <div class="text-[10px] opacity-50 mb-1 uppercase font-bold">ファイル名</div>
-                            <div id="info-filename" class="text-sm font-mono truncate text-yellow-500">---</div>
+        <div class="grid grid-cols-1 lg:grid-cols-4 gap-6">
+            <!-- Stats Sidebar -->
+            <div class="lg:col-span-1 space-y-4">
+                <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+                    <h2 class="text-xs uppercase tracking-wider text-slate-400 font-bold mb-4">測量レポート</h2>
+                    <div class="space-y-4">
+                        <div class="bg-slate-50 p-3 rounded-lg">
+                            <div class="text-[10px] text-slate-400 uppercase font-bold">総距離</div>
+                            <div id="stat-dist" class="text-2xl font-black text-slate-800">- <span class="text-sm font-normal">m</span></div>
                         </div>
-                        <div class="grid grid-cols-2 gap-4">
-                            <div>
-                                <div class="text-[10px] opacity-50 mb-1 uppercase font-bold">総距離</div>
-                                <div id="stat-dist" class="text-xl font-mono text-white">- m</div>
+                        <div class="grid grid-cols-2 gap-3">
+                            <div class="bg-slate-50 p-3 rounded-lg">
+                                <div class="text-[10px] text-slate-400 uppercase font-bold">高低差</div>
+                                <div id="stat-ele" class="text-lg font-bold text-green-600">- m</div>
                             </div>
-                            <div>
-                                <div class="text-[10px] opacity-50 mb-1 uppercase font-bold">標高差</div>
-                                <div id="stat-ele" class="text-xl font-mono text-green-400">- m</div>
-                            </div>
-                        </div>
-                        <div class="grid grid-cols-2 gap-4">
-                            <div>
-                                <div class="text-[10px] opacity-50 mb-1 uppercase font-bold">計測点</div>
-                                <div id="stat-points" class="text-xl font-mono text-white">-</div>
-                            </div>
-                            <div>
-                                <div class="text-[10px] opacity-50 mb-1 uppercase font-bold">平均勾配</div>
-                                <div id="stat-gradient" class="text-xl font-mono text-white">- %</div>
+                            <div class="bg-slate-50 p-3 rounded-lg">
+                                <div class="text-[10px] text-slate-400 uppercase font-bold">平均勾配</div>
+                                <div id="stat-gradient" class="text-lg font-bold text-blue-600">- %</div>
                             </div>
                         </div>
                     </div>
                 </div>
 
-                <div class="bg-blue-900/20 p-4 rounded-xl border border-blue-500/30 text-xs leading-relaxed text-blue-200">
-                    <p class="font-bold mb-2">💡 コン部へのヒント</p>
-                    <p>方位（Heading）が狂う場合は、測量開始時にスマホを8の字に振ってキャリブレーションしてから歩き出すと精度が上がります。</p>
+                <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col gap-2">
+                    <button id="btn-download" class="w-full bg-slate-800 hover:bg-slate-700 text-white font-bold py-3 rounded-xl transition flex items-center justify-center gap-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                            <path fill-rule="evenodd" d="M4 3a2 2 0 00-2 2v10a2 2 0 002 2h12a2 2 0 002-2V5a2 2 0 00-2-2H4zm12 12H4l4-8 3 6 2-4 3 6z" clip-rule="evenodd" />
+                        </svg>
+                        地図を画像で保存
+                    </button>
+                    <p class="text-[10px] text-center text-slate-400">マウスホイールで地図の拡大縮小が可能です</p>
                 </div>
             </div>
 
-            <!-- Main Display -->
+            <!-- Main Visualizer -->
             <div class="lg:col-span-3 space-y-6">
-                <!-- 2D View -->
-                <div class="bg-slate-800/50 p-4 rounded-2xl border border-slate-700">
-                    <div class="flex items-center justify-between mb-4">
-                        <h3 class="text-xs font-bold text-slate-400 uppercase tracking-widest">平面軌跡 (Top View)</h3>
-                        <span id="coord-display" class="text-[10px] font-mono text-slate-500"></span>
+                <!-- Map View -->
+                <div class="canvas-container h-[500px]">
+                    <div class="absolute top-4 left-4 z-10 flex items-center gap-2">
+                        <span class="bg-white/90 px-3 py-1 rounded-full text-[10px] font-bold shadow-sm border border-slate-200">平面軌跡 (Top View)</span>
+                        <span id="zoom-level" class="bg-white/90 px-3 py-1 rounded-full text-[10px] font-bold shadow-sm border border-slate-200 text-blue-600">Zoom: 100%</span>
                     </div>
-                    <canvas id="canvas-map" class="w-full h-[450px]"></canvas>
+                    <canvas id="canvas-map"></canvas>
                 </div>
 
                 <!-- Profile View -->
-                <div class="bg-slate-800/50 p-4 rounded-2xl border border-slate-700">
-                    <h3 class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">標高断面図 (Elevation Profile)</h3>
-                    <canvas id="canvas-elevation" class="w-full h-[180px]"></canvas>
+                <div class="canvas-container h-[200px]">
+                    <div class="absolute top-4 left-4 z-10">
+                        <span class="bg-white/90 px-3 py-1 rounded-full text-[10px] font-bold shadow-sm border border-slate-200">標高プロファイル (Profile)</span>
+                    </div>
+                    <canvas id="canvas-elevation"></canvas>
                 </div>
             </div>
         </div>
@@ -101,16 +119,25 @@
         const dropArea = document.getElementById('drop-area');
         const fileLabel = document.getElementById('file-label');
 
-        function resize() {
-            canvasMap.width = canvasMap.clientWidth * window.devicePixelRatio;
-            canvasMap.height = canvasMap.clientHeight * window.devicePixelRatio;
-            canvasEle.width = canvasEle.clientWidth * window.devicePixelRatio;
-            canvasEle.height = canvasEle.clientHeight * window.devicePixelRatio;
-        }
-        window.addEventListener('resize', resize);
-        resize();
+        let points = [];
+        let viewState = { x: 0, y: 0, zoom: 1.0, isDragging: false, lastMouse: { x: 0, y: 0 } };
+        let bounds = { minX: 0, maxX: 0, minY: 0, maxY: 0, minZ: 0, maxZ: 0 };
 
-        // ファイル読み込み処理
+        function initCanvas() {
+            const dpr = window.devicePixelRatio || 1;
+            canvasMap.width = canvasMap.clientWidth * dpr;
+            canvasMap.height = canvasMap.clientHeight * dpr;
+            canvasEle.width = canvasEle.clientWidth * dpr;
+            canvasEle.height = canvasEle.clientHeight * dpr;
+            ctxMap.scale(dpr, dpr);
+            ctxEle.scale(dpr, dpr);
+            draw();
+        }
+
+        window.addEventListener('resize', initCanvas);
+        setTimeout(initCanvas, 100); // 初期描画待ち
+
+        // ファイル処理
         dropArea.onclick = () => fileInput.click();
         dropArea.ondragover = (e) => { e.preventDefault(); dropArea.classList.add('drag-over'); };
         dropArea.ondragleave = () => dropArea.classList.remove('drag-over');
@@ -128,149 +155,191 @@
             reader.onload = (e) => {
                 try {
                     const data = JSON.parse(e.target.result);
-                    document.getElementById('info-filename').innerText = file.name;
+                    processData(data);
                     fileLabel.innerText = file.name;
-                    render(data);
-                } catch (err) {
-                    alert("JSONファイルの解析に失敗しました。");
-                }
+                } catch (err) { alert("JSON解析エラー"); }
             };
             reader.readAsText(file);
         }
 
-        function render(data) {
-            if (!Array.isArray(data) || data.length === 0) return;
-
-            let points = [];
-            let currentX = 0, currentY = 0, currentZ = 0;
-            let lastDist = 0;
-            let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
+        function processData(data) {
+            points = [];
+            let cx = 0, cy = 0, cz = 0, lastD = 0;
+            bounds = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity, minZ: Infinity, maxZ: -Infinity };
 
             data.forEach((d, i) => {
-                const stepDist = (i === 0) ? d.d : (d.d - lastDist);
-                lastDist = d.d;
+                const step = (i === 0) ? d.d : (d.d - lastD);
+                lastD = d.d;
+                const hRad = (d.h * Math.PI) / 180;
+                const pRad = (d.p * Math.PI) / 180;
+                const hDist = step * Math.cos(pRad);
+                cx += hDist * Math.sin(hRad);
+                cy -= hDist * Math.cos(hRad);
+                cz += step * Math.sin(pRad);
 
-                const angleRad = (d.h * Math.PI) / 180;
-                const pitchRad = (d.p * Math.PI) / 180;
-
-                const hDist = stepDist * Math.cos(pitchRad);
-                const vDist = stepDist * Math.sin(pitchRad);
-
-                currentX += hDist * Math.sin(angleRad);
-                currentY -= hDist * Math.cos(angleRad);
-                currentZ += vDist;
-
-                const p = { x: currentX, y: currentY, z: currentZ, dist: d.d };
-                points.push(p);
-
-                minX = Math.min(minX, currentX); maxX = Math.max(maxX, currentX);
-                minY = Math.min(minY, currentY); maxY = Math.max(maxY, currentY);
-                minZ = Math.min(minZ, currentZ); maxZ = Math.max(maxZ, currentZ);
+                points.push({ x: cx, y: cy, z: cz, d: d.d });
+                bounds.minX = Math.min(bounds.minX, cx); bounds.maxX = Math.max(bounds.maxX, cx);
+                bounds.minY = Math.min(bounds.minY, cy); bounds.maxY = Math.max(bounds.maxY, cy);
+                bounds.minZ = Math.min(bounds.minZ, cz); bounds.maxZ = Math.max(bounds.maxZ, cz);
             });
 
-            // 統計の計算
-            const totalDist = points[points.length-1].dist;
-            const totalEleDiff = maxZ - minZ;
-            const avgGradient = totalDist > 0 ? (totalEleDiff / totalDist) * 100 : 0;
+            // 統計
+            const totalDist = points[points.length-1].d;
+            document.getElementById('stat-dist').innerHTML = `${totalDist.toFixed(1)} <span class="text-sm font-normal text-slate-400">m</span>`;
+            document.getElementById('stat-ele').innerText = `${(bounds.maxZ - bounds.minZ).toFixed(2)} m`;
+            document.getElementById('stat-gradient').innerText = `${((bounds.maxZ - bounds.minZ) / (totalDist || 1) * 100).toFixed(1)} %`;
 
-            document.getElementById('stat-dist').innerText = totalDist.toFixed(1) + " m";
-            document.getElementById('stat-ele').innerText = totalEleDiff.toFixed(2) + " m";
-            document.getElementById('stat-points').innerText = points.length;
-            document.getElementById('stat-gradient').innerText = avgGradient.toFixed(1) + " %";
+            // 自動フィット
+            const pad = 50;
+            const w = canvasMap.clientWidth - pad * 2;
+            const h = canvasMap.clientHeight - pad * 2;
+            const scale = Math.min(w / (bounds.maxX - bounds.minX || 1), h / (bounds.maxY - bounds.minY || 1));
+            viewState.zoom = scale;
+            viewState.x = canvasMap.clientWidth / 2 - ((bounds.maxX + bounds.minX) / 2) * scale;
+            viewState.y = canvasMap.clientHeight / 2 - ((bounds.maxY + bounds.minY) / 2) * scale;
 
-            drawMap(points, minX, maxX, minY, maxY);
-            drawElevation(points, minZ, maxZ, totalDist);
+            draw();
         }
 
-        function drawMap(points, minX, maxX, minY, maxY) {
-            ctxMap.clearRect(0, 0, canvasMap.width, canvasMap.height);
-            const padding = 80;
-            const w = canvasMap.width - padding * 2;
-            const h = canvasMap.height - padding * 2;
-            const rangeX = maxX - minX || 1;
-            const rangeY = maxY - minY || 1;
-            const scale = Math.min(w / rangeX, h / rangeY);
+        function draw() {
+            drawMap();
+            drawElevation();
+        }
 
-            const offsetX = padding + (w - rangeX * scale) / 2;
-            const offsetY = padding + (h - rangeY * scale) / 2;
+        function drawMap() {
+            ctxMap.clearRect(0, 0, canvasMap.clientWidth, canvasMap.clientHeight);
+            if (points.length < 2) return;
 
-            // 方位計背景
-            ctxMap.strokeStyle = 'rgba(255,255,255,0.05)';
-            ctxMap.lineWidth = 2;
+            ctxMap.save();
+            ctxMap.translate(viewState.x, viewState.y);
+            ctxMap.scale(viewState.zoom, viewState.zoom);
+
+            // 道の枠（縁取り）
             ctxMap.beginPath();
-            ctxMap.arc(canvasMap.width/2, canvasMap.height/2, Math.min(w,h)/2, 0, Math.PI*2);
-            ctxMap.stroke();
-
-            // 軌跡
-            ctxMap.beginPath();
-            ctxMap.lineWidth = 5;
             ctxMap.lineJoin = 'round';
             ctxMap.lineCap = 'round';
-            ctxMap.strokeStyle = '#3b82f6';
+            ctxMap.strokeStyle = '#e2e8f0'; // 枠の色
+            ctxMap.lineWidth = 20 / viewState.zoom; // ズームしても太さを一定に保つ工夫
             points.forEach((p, i) => {
-                const x = (p.x - minX) * scale + offsetX;
-                const y = (p.y - minY) * scale + offsetY;
-                if (i === 0) ctxMap.moveTo(x, y);
-                else ctxMap.lineTo(x, y);
+                if (i === 0) ctxMap.moveTo(p.x, p.y);
+                else ctxMap.lineTo(p.x, p.y);
             });
             ctxMap.stroke();
 
-            // 始点・終点
-            const start = points[0];
-            const end = points[points.length-1];
-            drawPoint(ctxMap, (start.x - minX) * scale + offsetX, (start.y - minY) * scale + offsetY, '#4ade80', 'START');
-            drawPoint(ctxMap, (end.x - minX) * scale + offsetX, (end.y - minY) * scale + offsetY, '#f87171', 'END');
+            // 道の中身
+            ctxMap.beginPath();
+            ctxMap.strokeStyle = '#ffffff'; // 中の色
+            ctxMap.lineWidth = 14 / viewState.zoom;
+            points.forEach((p, i) => {
+                if (i === 0) ctxMap.moveTo(p.x, p.y);
+                else ctxMap.lineTo(p.x, p.y);
+            });
+            ctxMap.stroke();
+
+            // 中心線（細いアクセント）
+            ctxMap.beginPath();
+            ctxMap.strokeStyle = '#3b82f6'; 
+            ctxMap.lineWidth = 2 / viewState.zoom;
+            points.forEach((p, i) => {
+                if (i === 0) ctxMap.moveTo(p.x, p.y);
+                else ctxMap.lineTo(p.x, p.y);
+            });
+            ctxMap.stroke();
+
+            // マーカー
+            drawMarker(ctxMap, points[0], '#10b981', 'START');
+            drawMarker(ctxMap, points[points.length-1], '#ef4444', 'END');
+
+            ctxMap.restore();
+            document.getElementById('zoom-level').innerText = `Zoom: ${Math.round(viewState.zoom * 100)}%`;
         }
 
-        function drawElevation(points, minZ, maxZ, totalDist) {
-            ctxEle.clearRect(0, 0, canvasEle.width, canvasEle.height);
-            const padding = 40;
-            const w = canvasEle.width - padding * 2;
-            const h = canvasEle.height - padding * 2;
-            const rangeZ = Math.max(5, maxZ - minZ);
-            const scaleX = w / totalDist;
-            const scaleY = h / rangeZ;
+        function drawMarker(ctx, p, color, label) {
+            const size = 6 / viewState.zoom;
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, size, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = 'white';
+            ctx.lineWidth = 2 / viewState.zoom;
+            ctx.stroke();
+        }
 
-            // グラデーションの塗りつぶし
-            const grad = ctxEle.createLinearGradient(0, padding, 0, h + padding);
-            grad.addColorStop(0, 'rgba(16, 185, 129, 0.3)');
-            grad.addColorStop(1, 'rgba(16, 185, 129, 0)');
+        function drawElevation() {
+            ctxEle.clearRect(0, 0, canvasEle.clientWidth, canvasEle.clientHeight);
+            if (points.length < 2) return;
 
+            const w = canvasEle.clientWidth;
+            const h = canvasEle.clientHeight;
+            const pad = 40;
+            const rangeZ = Math.max(5, bounds.maxZ - bounds.minZ);
+            const totalD = points[points.length-1].d;
+
+            // 塗りつぶし
             ctxEle.beginPath();
-            ctxEle.fillStyle = grad;
-            ctxEle.moveTo(padding, h + padding);
+            ctxEle.fillStyle = '#f1f5f9';
+            ctxEle.moveTo(pad, h - pad);
             points.forEach(p => {
-                ctxEle.lineTo(p.dist * scaleX + padding, h - (p.z - minZ) * scaleY + padding);
+                const x = pad + (p.d / totalD) * (w - pad * 2);
+                const y = (h - pad) - ((p.z - bounds.minZ) / rangeZ) * (h - pad * 2);
+                ctxEle.lineTo(x, y);
             });
-            ctxEle.lineTo(totalDist * scaleX + padding, h + padding);
+            ctxEle.lineTo(w - pad, h - pad);
             ctxEle.fill();
 
             // 線
             ctxEle.beginPath();
-            ctxEle.strokeStyle = '#10b981';
+            ctxEle.strokeStyle = '#3b82f6';
             ctxEle.lineWidth = 3;
             points.forEach((p, i) => {
-                const x = p.dist * scaleX + padding;
-                const y = h - (p.z - minZ) * scaleY + padding;
+                const x = pad + (p.d / totalD) * (w - pad * 2);
+                const y = (h - pad) - ((p.z - bounds.minZ) / rangeZ) * (h - pad * 2);
                 if (i === 0) ctxEle.moveTo(x, y);
                 else ctxEle.lineTo(x, y);
             });
             ctxEle.stroke();
         }
 
-        function drawPoint(ctx, x, y, color, label) {
-            ctx.fillStyle = color;
-            ctx.beginPath();
-            ctx.arc(x, y, 8, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.strokeStyle = '#0f172a';
-            ctx.lineWidth = 2;
-            ctx.stroke();
-            ctx.fillStyle = 'white';
-            ctx.font = 'bold 10px sans-serif';
-            ctx.textAlign = 'center';
-            ctx.fillText(label, x, y - 15);
-        }
+        // インタラクション (Zoom & Pan)
+        canvasMap.onwheel = (e) => {
+            e.preventDefault();
+            const delta = e.deltaY > 0 ? 0.9 : 1.1;
+            const mouseX = e.offsetX;
+            const mouseY = e.offsetY;
+            
+            // マウス位置を中心にズーム
+            const worldX = (mouseX - viewState.x) / viewState.zoom;
+            const worldY = (mouseY - viewState.y) / viewState.zoom;
+            
+            viewState.zoom *= delta;
+            viewState.x = mouseX - worldX * viewState.zoom;
+            viewState.y = mouseY - worldY * viewState.zoom;
+            draw();
+        };
+
+        canvasMap.onmousedown = (e) => {
+            viewState.isDragging = true;
+            viewState.lastMouse = { x: e.offsetX, y: e.offsetY };
+        };
+        window.onmousemove = (e) => {
+            if (!viewState.isDragging) return;
+            const rect = canvasMap.getBoundingClientRect();
+            const dx = e.clientX - rect.left - viewState.lastMouse.x;
+            const dy = e.clientY - rect.top - viewState.lastMouse.y;
+            viewState.x += dx;
+            viewState.y += dy;
+            viewState.lastMouse = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+            draw();
+        };
+        window.onmouseup = () => viewState.isDragging = false;
+
+        // 画像保存
+        document.getElementById('btn-download').onclick = () => {
+            const link = document.createElement('a');
+            link.download = 'survey_map.png';
+            link.href = canvasMap.toDataURL();
+            link.click();
+        };
     </script>
 </body>
 </html>
