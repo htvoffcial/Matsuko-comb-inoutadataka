@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ino Project - File Viewer</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background: #0f172a; color: #f1f5f9; font-family: sans-serif; }
+        canvas { background: #1e293b; border-radius: 12px; }
+        .drop-zone {
+            border: 2px dashed #334155;
+            transition: all 0.3s ease;
+        }
+        .drop-zone.drag-over {
+            border-color: #3b82f6;
+            background: rgba(59, 130, 246, 0.1);
+        }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+    <div class="max-w-6xl mx-auto">
+        <header class="mb-8 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div>
+                <h1 class="text-3xl font-bold text-blue-400">伊能忠敬軌跡ビューアー <span class="text-sm font-normal text-slate-500 ml-2">v2.0 (File Ready)</span></h1>
+                <p class="text-sm opacity-70">計測アプリから出力されたJSONファイルを読み込みます</p>
+            </div>
+            
+            <div id="drop-area" class="drop-zone p-4 rounded-xl flex flex-col items-center justify-center cursor-pointer min-w-[300px]">
+                <input type="file" id="file-input" accept=".json" class="hidden">
+                <p class="text-sm text-slate-400" id="file-label">JSONファイルをアップロード、またはドロップ</p>
+                <button class="mt-2 text-xs bg-slate-700 hover:bg-slate-600 px-3 py-1 rounded">ファイルを選択</button>
+            </div>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-4 gap-8">
+            <!-- Sidebar: Stats and Info -->
+            <div class="lg:col-span-1 space-y-6">
+                <div class="bg-slate-800 p-6 rounded-2xl border border-slate-700 shadow-xl">
+                    <h2 class="text-xs uppercase tracking-widest text-blue-400 font-bold mb-4">測量ステータス</h2>
+                    <div class="space-y-6">
+                        <div>
+                            <div class="text-[10px] opacity-50 mb-1 uppercase font-bold">ファイル名</div>
+                            <div id="info-filename" class="text-sm font-mono truncate text-yellow-500">---</div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <div class="text-[10px] opacity-50 mb-1 uppercase font-bold">総距離</div>
+                                <div id="stat-dist" class="text-xl font-mono text-white">- m</div>
+                            </div>
+                            <div>
+                                <div class="text-[10px] opacity-50 mb-1 uppercase font-bold">標高差</div>
+                                <div id="stat-ele" class="text-xl font-mono text-green-400">- m</div>
+                            </div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-4">
+                            <div>
+                                <div class="text-[10px] opacity-50 mb-1 uppercase font-bold">計測点</div>
+                                <div id="stat-points" class="text-xl font-mono text-white">-</div>
+                            </div>
+                            <div>
+                                <div class="text-[10px] opacity-50 mb-1 uppercase font-bold">平均勾配</div>
+                                <div id="stat-gradient" class="text-xl font-mono text-white">- %</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bg-blue-900/20 p-4 rounded-xl border border-blue-500/30 text-xs leading-relaxed text-blue-200">
+                    <p class="font-bold mb-2">💡 コン部へのヒント</p>
+                    <p>方位（Heading）が狂う場合は、測量開始時にスマホを8の字に振ってキャリブレーションしてから歩き出すと精度が上がります。</p>
+                </div>
+            </div>
+
+            <!-- Main Display -->
+            <div class="lg:col-span-3 space-y-6">
+                <!-- 2D View -->
+                <div class="bg-slate-800/50 p-4 rounded-2xl border border-slate-700">
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-xs font-bold text-slate-400 uppercase tracking-widest">平面軌跡 (Top View)</h3>
+                        <span id="coord-display" class="text-[10px] font-mono text-slate-500"></span>
+                    </div>
+                    <canvas id="canvas-map" class="w-full h-[450px]"></canvas>
+                </div>
+
+                <!-- Profile View -->
+                <div class="bg-slate-800/50 p-4 rounded-2xl border border-slate-700">
+                    <h3 class="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">標高断面図 (Elevation Profile)</h3>
+                    <canvas id="canvas-elevation" class="w-full h-[180px]"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const canvasMap = document.getElementById('canvas-map');
+        const canvasEle = document.getElementById('canvas-elevation');
+        const ctxMap = canvasMap.getContext('2d');
+        const ctxEle = canvasEle.getContext('2d');
+        const fileInput = document.getElementById('file-input');
+        const dropArea = document.getElementById('drop-area');
+        const fileLabel = document.getElementById('file-label');
+
+        function resize() {
+            canvasMap.width = canvasMap.clientWidth * window.devicePixelRatio;
+            canvasMap.height = canvasMap.clientHeight * window.devicePixelRatio;
+            canvasEle.width = canvasEle.clientWidth * window.devicePixelRatio;
+            canvasEle.height = canvasEle.clientHeight * window.devicePixelRatio;
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        // ファイル読み込み処理
+        dropArea.onclick = () => fileInput.click();
+        dropArea.ondragover = (e) => { e.preventDefault(); dropArea.classList.add('drag-over'); };
+        dropArea.ondragleave = () => dropArea.classList.remove('drag-over');
+        dropArea.ondrop = (e) => {
+            e.preventDefault();
+            dropArea.classList.remove('drag-over');
+            handleFiles(e.dataTransfer.files);
+        };
+        fileInput.onchange = (e) => handleFiles(e.target.files);
+
+        function handleFiles(files) {
+            if (!files.length) return;
+            const file = files[0];
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                try {
+                    const data = JSON.parse(e.target.result);
+                    document.getElementById('info-filename').innerText = file.name;
+                    fileLabel.innerText = file.name;
+                    render(data);
+                } catch (err) {
+                    alert("JSONファイルの解析に失敗しました。");
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        function render(data) {
+            if (!Array.isArray(data) || data.length === 0) return;
+
+            let points = [];
+            let currentX = 0, currentY = 0, currentZ = 0;
+            let lastDist = 0;
+            let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
+
+            data.forEach((d, i) => {
+                const stepDist = (i === 0) ? d.d : (d.d - lastDist);
+                lastDist = d.d;
+
+                const angleRad = (d.h * Math.PI) / 180;
+                const pitchRad = (d.p * Math.PI) / 180;
+
+                const hDist = stepDist * Math.cos(pitchRad);
+                const vDist = stepDist * Math.sin(pitchRad);
+
+                currentX += hDist * Math.sin(angleRad);
+                currentY -= hDist * Math.cos(angleRad);
+                currentZ += vDist;
+
+                const p = { x: currentX, y: currentY, z: currentZ, dist: d.d };
+                points.push(p);
+
+                minX = Math.min(minX, currentX); maxX = Math.max(maxX, currentX);
+                minY = Math.min(minY, currentY); maxY = Math.max(maxY, currentY);
+                minZ = Math.min(minZ, currentZ); maxZ = Math.max(maxZ, currentZ);
+            });
+
+            // 統計の計算
+            const totalDist = points[points.length-1].dist;
+            const totalEleDiff = maxZ - minZ;
+            const avgGradient = totalDist > 0 ? (totalEleDiff / totalDist) * 100 : 0;
+
+            document.getElementById('stat-dist').innerText = totalDist.toFixed(1) + " m";
+            document.getElementById('stat-ele').innerText = totalEleDiff.toFixed(2) + " m";
+            document.getElementById('stat-points').innerText = points.length;
+            document.getElementById('stat-gradient').innerText = avgGradient.toFixed(1) + " %";
+
+            drawMap(points, minX, maxX, minY, maxY);
+            drawElevation(points, minZ, maxZ, totalDist);
+        }
+
+        function drawMap(points, minX, maxX, minY, maxY) {
+            ctxMap.clearRect(0, 0, canvasMap.width, canvasMap.height);
+            const padding = 80;
+            const w = canvasMap.width - padding * 2;
+            const h = canvasMap.height - padding * 2;
+            const rangeX = maxX - minX || 1;
+            const rangeY = maxY - minY || 1;
+            const scale = Math.min(w / rangeX, h / rangeY);
+
+            const offsetX = padding + (w - rangeX * scale) / 2;
+            const offsetY = padding + (h - rangeY * scale) / 2;
+
+            // 方位計背景
+            ctxMap.strokeStyle = 'rgba(255,255,255,0.05)';
+            ctxMap.lineWidth = 2;
+            ctxMap.beginPath();
+            ctxMap.arc(canvasMap.width/2, canvasMap.height/2, Math.min(w,h)/2, 0, Math.PI*2);
+            ctxMap.stroke();
+
+            // 軌跡
+            ctxMap.beginPath();
+            ctxMap.lineWidth = 5;
+            ctxMap.lineJoin = 'round';
+            ctxMap.lineCap = 'round';
+            ctxMap.strokeStyle = '#3b82f6';
+            points.forEach((p, i) => {
+                const x = (p.x - minX) * scale + offsetX;
+                const y = (p.y - minY) * scale + offsetY;
+                if (i === 0) ctxMap.moveTo(x, y);
+                else ctxMap.lineTo(x, y);
+            });
+            ctxMap.stroke();
+
+            // 始点・終点
+            const start = points[0];
+            const end = points[points.length-1];
+            drawPoint(ctxMap, (start.x - minX) * scale + offsetX, (start.y - minY) * scale + offsetY, '#4ade80', 'START');
+            drawPoint(ctxMap, (end.x - minX) * scale + offsetX, (end.y - minY) * scale + offsetY, '#f87171', 'END');
+        }
+
+        function drawElevation(points, minZ, maxZ, totalDist) {
+            ctxEle.clearRect(0, 0, canvasEle.width, canvasEle.height);
+            const padding = 40;
+            const w = canvasEle.width - padding * 2;
+            const h = canvasEle.height - padding * 2;
+            const rangeZ = Math.max(5, maxZ - minZ);
+            const scaleX = w / totalDist;
+            const scaleY = h / rangeZ;
+
+            // グラデーションの塗りつぶし
+            const grad = ctxEle.createLinearGradient(0, padding, 0, h + padding);
+            grad.addColorStop(0, 'rgba(16, 185, 129, 0.3)');
+            grad.addColorStop(1, 'rgba(16, 185, 129, 0)');
+
+            ctxEle.beginPath();
+            ctxEle.fillStyle = grad;
+            ctxEle.moveTo(padding, h + padding);
+            points.forEach(p => {
+                ctxEle.lineTo(p.dist * scaleX + padding, h - (p.z - minZ) * scaleY + padding);
+            });
+            ctxEle.lineTo(totalDist * scaleX + padding, h + padding);
+            ctxEle.fill();
+
+            // 線
+            ctxEle.beginPath();
+            ctxEle.strokeStyle = '#10b981';
+            ctxEle.lineWidth = 3;
+            points.forEach((p, i) => {
+                const x = p.dist * scaleX + padding;
+                const y = h - (p.z - minZ) * scaleY + padding;
+                if (i === 0) ctxEle.moveTo(x, y);
+                else ctxEle.lineTo(x, y);
+            });
+            ctxEle.stroke();
+        }
+
+        function drawPoint(ctx, x, y, color, label) {
+            ctx.fillStyle = color;
+            ctx.beginPath();
+            ctx.arc(x, y, 8, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = '#0f172a';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            ctx.fillStyle = 'white';
+            ctx.font = 'bold 10px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(label, x, y - 15);
+        }
+    </script>
+</body>
+</html>
