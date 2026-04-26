@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ino Project - Advanced Map Merger</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { background: #f8fafc; color: #1e293b; font-family: sans-serif; }
+        .canvas-container { background: #ffffff; border-radius: 16px; border: 1px solid #e2e8f0; position: relative; overflow: hidden; box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1); }
+        canvas { touch-action: none; display: block; }
+        .active-tab { border-bottom: 3px solid #3b82f6; color: #3b82f6; font-weight: bold; }
+        .sidebar { height: calc(100vh - 48px); overflow-y: auto; }
+    </style>
+</head>
+<body class="p-6">
+    <div class="max-w-[1600px] mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8">
+        
+        <!-- Sidebar: Configuration and Files -->
+        <div class="lg:col-span-3 space-y-6 sidebar">
+            <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                <h1 class="text-2xl font-black text-slate-800 mb-1">地図統合エディタ <span class="text-blue-600">Pro</span></h1>
+                <p class="text-[10px] text-slate-400 font-bold uppercase tracking-tighter mb-6">Advanced Mapping System</p>
+                
+                <div id="drop-area" class="border-2 border-dashed border-slate-200 rounded-xl p-6 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-all group">
+                    <input type="file" id="file-input" multiple accept=".json" class="hidden">
+                    <div class="text-slate-300 group-hover:text-blue-400 mb-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" class="h-10 w-10 mx-auto" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 13h6m-3-3v6m5 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                        </svg>
+                    </div>
+                    <p class="text-xs font-bold text-slate-600">測量データをドロップ</p>
+                </div>
+            </div>
+
+            <!-- Mode Selector -->
+            <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                <h2 class="text-xs font-black text-slate-400 uppercase mb-4 tracking-widest">統合モード設定</h2>
+                <div class="grid grid-cols-2 gap-2 mb-4">
+                    <button id="mode-same" class="py-2 text-[10px] rounded-lg border-2 border-blue-600 bg-blue-50 text-blue-700 font-bold active-btn">同じ道を統合<br>(精度向上)</button>
+                    <button id="mode-new" class="py-2 text-[10px] rounded-lg border-2 border-slate-100 bg-slate-50 text-slate-400 font-bold">別の道を追加<br>(地図拡張)</button>
+                </div>
+                <p id="mode-desc" class="text-[10px] text-slate-500 leading-relaxed italic">
+                    形状の似た部分を自動でスキャンし、回転・倍率を調整して重ね合わせます。
+                </p>
+            </div>
+
+            <div class="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                <h2 class="text-xs font-black text-slate-400 uppercase mb-4 tracking-widest">読み込み済みリスト</h2>
+                <div id="file-list" class="space-y-2 mb-6">
+                    <p class="text-[10px] text-slate-400 italic">ファイルがありません</p>
+                </div>
+                <button id="btn-process" class="w-full bg-slate-900 hover:bg-slate-800 text-white font-bold py-3 rounded-xl text-xs transition shadow-lg">
+                    データを解析して統合を実行
+                </button>
+                <button id="btn-export" class="w-full mt-2 border border-slate-200 text-slate-600 font-bold py-2 rounded-xl text-xs hover:bg-slate-50 transition">
+                    統合結果をエクスポート
+                </button>
+            </div>
+        </div>
+
+        <!-- Main View -->
+        <div class="lg:col-span-9 space-y-6">
+            <div class="canvas-container h-[600px]">
+                <div class="absolute top-4 left-4 z-10 flex gap-2">
+                    <span class="bg-white/90 px-4 py-2 rounded-full text-[10px] font-black shadow-sm border border-slate-100 flex items-center gap-2 uppercase tracking-widest">
+                        <div class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div> Live Preview
+                    </span>
+                    <span id="status-label" class="bg-blue-600 px-4 py-2 rounded-full text-[10px] font-bold text-white shadow-lg">待機中</span>
+                </div>
+                <canvas id="canvas-main"></canvas>
+            </div>
+
+            <div class="canvas-container h-[180px]">
+                <div class="absolute top-3 left-4 z-10">
+                    <span class="bg-white/90 px-3 py-1 rounded-full text-[10px] font-black shadow-sm border border-slate-100 uppercase tracking-widest">Elevation Profile</span>
+                </div>
+                <canvas id="canvas-ele"></canvas>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const canvasMain = document.getElementById('canvas-main');
+        const canvasEle = document.getElementById('canvas-ele');
+        const ctxMain = canvasMain.getContext('2d');
+        const ctxEle = canvasEle.getContext('2d');
+        
+        let surveyFiles = []; 
+        let masterPath = [];
+        let currentMode = 'same'; // 'same' or 'new'
+        let viewState = { x: 0, y: 0, zoom: 1.0, isDragging: false, lastMouse: { x: 0, y: 0 } };
+
+        // UI Mode Toggle
+        document.getElementById('mode-same').onclick = () => setMode('same');
+        document.getElementById('mode-new').onclick = () => setMode('new');
+
+        function setMode(mode) {
+            currentMode = mode;
+            const sBtn = document.getElementById('mode-same');
+            const nBtn = document.getElementById('mode-new');
+            const desc = document.getElementById('mode-desc');
+            
+            if(mode === 'same') {
+                sBtn.className = "py-2 text-[10px] rounded-lg border-2 border-blue-600 bg-blue-50 text-blue-700 font-bold";
+                nBtn.className = "py-2 text-[10px] rounded-lg border-2 border-slate-100 bg-slate-50 text-slate-400 font-bold";
+                desc.innerText = "形状の似た部分を自動でスキャンし、回転・倍率を調整して重ね合わせます。";
+            } else {
+                nBtn.className = "py-2 text-[10px] rounded-lg border-2 border-blue-600 bg-blue-50 text-blue-700 font-bold";
+                sBtn.className = "py-2 text-[10px] rounded-lg border-2 border-slate-100 bg-slate-50 text-slate-400 font-bold";
+                desc.innerText = "現在の道の末尾に新しいデータを繋げます。";
+            }
+        }
+
+        function initCanvas() {
+            const dpr = window.devicePixelRatio || 1;
+            canvasMain.width = canvasMain.clientWidth * dpr;
+            canvasMain.height = canvasMain.clientHeight * dpr;
+            canvasEle.width = canvasEle.clientWidth * dpr;
+            canvasEle.height = canvasEle.clientHeight * dpr;
+            ctxMain.scale(dpr, dpr);
+            ctxEle.scale(dpr, dpr);
+            draw();
+        }
+        window.addEventListener('resize', initCanvas);
+        setTimeout(initCanvas, 100);
+
+        // ファイル処理
+        const fileInput = document.getElementById('file-input');
+        document.getElementById('drop-area').onclick = () => fileInput.click();
+        fileInput.onchange = (e) => handleFiles(e.target.files);
+
+        function handleFiles(files) {
+            Array.from(files).forEach(file => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        const data = JSON.parse(e.target.result);
+                        const points = convertToCartesian(data);
+                        surveyFiles.push({ name: file.name, points: points, original: data });
+                        updateFileList();
+                        draw();
+                    } catch (err) { console.error("Invalid JSON", err); }
+                };
+                reader.readAsText(file);
+            });
+        }
+
+        function convertToCartesian(data) {
+            let pts = [], cx = 0, cy = 0, cz = 0, lastD = 0;
+            data.forEach((d, i) => {
+                const step = (i === 0) ? d.d : (d.d - lastD);
+                lastD = d.d;
+                const hRad = (d.h * Math.PI) / 180;
+                const pRad = (d.p * Math.PI) / 180;
+                cx += step * Math.cos(pRad) * Math.sin(hRad);
+                cy -= step * Math.cos(pRad) * Math.cos(hRad);
+                cz += step * Math.sin(pRad);
+                pts.push({ x: cx, y: cy, z: cz, d: d.d });
+            });
+            return pts;
+        }
+
+        function updateFileList() {
+            const list = document.getElementById('file-list');
+            list.innerHTML = surveyFiles.map((f, i) => `
+                <div class="flex items-center justify-between p-3 bg-slate-50 rounded-xl border border-slate-100 group">
+                    <span class="text-[10px] font-bold text-slate-600 truncate max-w-[150px]">${f.name}</span>
+                    <button onclick="removeFile(${i})" class="text-slate-300 hover:text-red-500 transition">✕</button>
+                </div>
+            `).join('');
+        }
+
+        window.removeFile = (i) => {
+            surveyFiles.splice(i, 1);
+            updateFileList();
+            draw();
+        };
+
+        // 統合エンジンの実行
+        document.getElementById('btn-process').onclick = () => {
+            if (surveyFiles.length < 1) return;
+            document.getElementById('status-label').innerText = "解析中...";
+
+            if (currentMode === 'same') {
+                mergeSamePaths();
+            } else {
+                extendPaths();
+            }
+            
+            document.getElementById('status-label').innerText = "統合完了";
+            autoFit();
+            draw();
+        };
+
+        function mergeSamePaths() {
+            if (surveyFiles.length < 1) return;
+            
+            // 最初のファイルをベース（基準）にする
+            let base = JSON.parse(JSON.stringify(surveyFiles[0].points));
+            
+            for (let i = 1; i < surveyFiles.length; i++) {
+                let target = surveyFiles[i].points;
+                
+                // --- 特徴マッチング（全体形状を考慮したPCA的アプローチ） ---
+                // 1. 各データの重心を計算
+                const centerBase = getCenter(base);
+                const centerTarget = getCenter(target);
+                
+                // 2. 主成分分析(PCA)による「道の全体的な向き」の算出
+                const angleBase = getPrincipalAngle(base, centerBase);
+                const angleTarget = getPrincipalAngle(target, centerTarget);
+                
+                // 向きの差分
+                let diffAngle = angleBase - angleTarget;
+                
+                // ※PCAの向きは180度逆になる可能性があるので、始点から終点のベクトルで前後を補正
+                const vecBase = { x: base[base.length-1].x - base[0].x, y: base[base.length-1].y - base[0].y };
+                const vecTargetRotated = { 
+                    x: (target[target.length-1].x - target[0].x) * Math.cos(diffAngle) - (target[target.length-1].y - target[0].y) * Math.sin(diffAngle),
+                    y: (target[target.length-1].x - target[0].x) * Math.sin(diffAngle) + (target[target.length-1].y - target[0].y) * Math.cos(diffAngle)
+                };
+                if (vecBase.x * vecTargetRotated.x + vecBase.y * vecTargetRotated.y < 0) {
+                    diffAngle += Math.PI; // 逆向きなら180度反転
+                }
+                
+                // 3. 全体の広がり（標準偏差）から倍率（歩幅誤差）を算出
+                const spreadBase = getSpread(base, centerBase);
+                const spreadTarget = getSpread(target, centerTarget);
+                const scale = (spreadTarget > 0) ? (spreadBase / spreadTarget) : 1;
+
+                // 4. Targetを回転・拡大・移動してBaseに合わせる
+                const transformedTarget = target.map(p => {
+                    // 中心へ
+                    let tx = p.x - centerTarget.x;
+                    let ty = p.y - centerTarget.y;
+                    // スケール
+                    tx *= scale; ty *= scale;
+                    // 回転
+                    const rx = tx * Math.cos(diffAngle) - ty * Math.sin(diffAngle);
+                    const ry = tx * Math.sin(diffAngle) + ty * Math.cos(diffAngle);
+                    // Baseの中心へ
+                    return { x: rx + centerBase.x, y: ry + centerBase.y, z: p.z * scale, d: p.d * scale };
+                });
+
+                // 5. 平均化（インデックス比で補完して合成）
+                const maxLen = Math.min(base.length, transformedTarget.length);
+                for(let j=0; j<maxLen; j++) {
+                    base[j].x = (base[j].x + transformedTarget[j].x) / 2;
+                    base[j].y = (base[j].y + transformedTarget[j].y) / 2;
+                    base[j].z = (base[j].z + transformedTarget[j].z) / 2;
+                }
+            }
+            masterPath = base;
+        }
+
+        // --- 追加した高度な解析用関数 ---
+        function getPrincipalAngle(pts, center) {
+            // 分散共分散行列を計算して主成分の角度を出す
+            let sxx = 0, syy = 0, sxy = 0;
+            pts.forEach(p => {
+                const dx = p.x - center.x;
+                const dy = p.y - center.y;
+                sxx += dx * dx;
+                syy += dy * dy;
+                sxy += dx * dy;
+            });
+            return 0.5 * Math.atan2(2 * sxy, sxx - syy);
+        }
+
+        function getSpread(pts, center) {
+            // 重心からの距離の二乗和の平均（広がり具合）
+            let sumSq = 0;
+            pts.forEach(p => {
+                sumSq += (p.x - center.x)**2 + (p.y - center.y)**2;
+            });
+            return Math.sqrt(sumSq / pts.length);
+        }
+        // -------------------------------
+
+        function extendPaths() {
+            masterPath = [];
+            let lastX = 0, lastY = 0, lastZ = 0, lastD = 0;
+            surveyFiles.forEach(f => {
+                f.points.forEach(p => {
+                    masterPath.push({
+                        x: p.x + lastX,
+                        y: p.y + lastY,
+                        z: p.z + lastZ,
+                        d: p.d + lastD
+                    });
+                });
+                const end = masterPath[masterPath.length - 1];
+                lastX = end.x; lastY = end.y; lastZ = end.z; lastD = end.d;
+            });
+        }
+
+        function getCenter(pts) {
+            let sx = 0, sy = 0;
+            pts.forEach(p => { sx += p.x; sy += p.y; });
+            return { x: sx / pts.length, y: sy / pts.length };
+        }
+
+        function draw() {
+            ctxMain.clearRect(0, 0, canvasMain.clientWidth, canvasMain.clientHeight);
+            ctxEle.clearRect(0, 0, canvasEle.clientWidth, canvasEle.clientHeight);
+
+            ctxMain.save();
+            ctxMain.translate(viewState.x, viewState.y);
+            ctxMain.scale(viewState.zoom, viewState.zoom);
+
+            // 補助線グリッド
+            ctxMain.strokeStyle = '#f1f5f9';
+            ctxMain.lineWidth = 1 / viewState.zoom;
+            for(let i=-2000; i<2000; i+=100) {
+                ctxMain.beginPath(); ctxMain.moveTo(i, -2000); ctxMain.lineTo(i, 2000); ctxMain.stroke();
+                ctxMain.beginPath(); ctxMain.moveTo(-2000, i); ctxMain.lineTo(2000, i); ctxMain.stroke();
+            }
+
+            // 個別データ表示
+            surveyFiles.forEach((f, idx) => {
+                ctxMain.beginPath();
+                ctxMain.strokeStyle = `hsla(${idx * 137}, 60%, 50%, 0.2)`;
+                ctxMain.lineWidth = 4 / viewState.zoom;
+                f.points.forEach((p, i) => {
+                    if (i === 0) ctxMain.moveTo(p.x, p.y);
+                    else ctxMain.lineTo(p.x, p.y);
+                });
+                ctxMain.stroke();
+            });
+
+            // マスターパス表示
+            if (masterPath.length > 0) {
+                ctxMain.beginPath();
+                ctxMain.strokeStyle = '#3b82f6';
+                ctxMain.lineWidth = 6 / viewState.zoom;
+                ctxMain.lineCap = 'round';
+                ctxMain.lineJoin = 'round';
+                masterPath.forEach((p, i) => {
+                    if (i === 0) ctxMain.moveTo(p.x, p.y);
+                    else ctxMain.lineTo(p.x, p.y);
+                });
+                ctxMain.stroke();
+                
+                // 装飾（白の中抜き）
+                ctxMain.beginPath();
+                ctxMain.strokeStyle = '#ffffff';
+                ctxMain.lineWidth = 2 / viewState.zoom;
+                masterPath.forEach((p, i) => {
+                    if (i === 0) ctxMain.moveTo(p.x, p.y);
+                    else ctxMain.lineTo(p.x, p.y);
+                });
+                ctxMain.stroke();
+            }
+
+            ctxMain.restore();
+            drawElevation();
+        }
+
+        function drawElevation() {
+            if (masterPath.length < 2) return;
+            const w = canvasEle.clientWidth, h = canvasEle.clientHeight, pad = 40;
+            const totalD = masterPath[masterPath.length-1].d;
+            const minZ = Math.min(...masterPath.map(p => p.z));
+            const maxZ = Math.max(...masterPath.map(p => p.z));
+            const rZ = Math.max(5, maxZ - minZ);
+
+            ctxEle.beginPath();
+            ctxEle.strokeStyle = '#3b82f6';
+            ctxEle.lineWidth = 2;
+            masterPath.forEach((p, i) => {
+                const x = pad + (p.d / totalD) * (w - pad*2);
+                const y = (h - pad) - ((p.z - minZ) / rZ) * (h - pad*2);
+                if (i === 0) ctxEle.moveTo(x, y);
+                else ctxEle.lineTo(x, y);
+            });
+            ctxEle.stroke();
+        }
+
+        // View Controls
+        canvasMain.onmousedown = (e) => { viewState.isDragging = true; viewState.lastMouse = { x: e.clientX, y: e.clientY }; };
+        window.onmousemove = (e) => {
+            if (!viewState.isDragging) return;
+            viewState.x += (e.clientX - viewState.lastMouse.x);
+            viewState.y += (e.clientY - viewState.lastMouse.y);
+            viewState.lastMouse = { x: e.clientX, y: e.clientY };
+            draw();
+        };
+        window.onmouseup = () => viewState.isDragging = false;
+        canvasMain.onwheel = (e) => {
+            e.preventDefault();
+            const delta = e.deltaY > 0 ? 0.9 : 1.1;
+            viewState.zoom *= delta;
+            draw();
+        };
+
+        function autoFit() {
+            if (!masterPath.length) return;
+            const xs = masterPath.map(p => p.x), ys = masterPath.map(p => p.y);
+            const minX = Math.min(...xs), maxX = Math.max(...xs), minY = Math.min(...ys), maxY = Math.max(...ys);
+            const w = canvasMain.clientWidth - 100, h = canvasMain.clientHeight - 100;
+            const scale = Math.min(w / (maxX - minX || 1), h / (maxY - minY || 1));
+            viewState.zoom = scale;
+            viewState.x = canvasMain.clientWidth / 2 - ((maxX + minX) / 2) * scale;
+            viewState.y = canvasMain.clientHeight / 2 - ((maxY + minY) / 2) * scale;
+        }
+
+        document.getElementById('btn-export').onclick = () => {
+            if (!masterPath.length) return;
+            const blob = new Blob([JSON.stringify(masterPath, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = 'survey_merged_pro.json'; a.click();
+        };
+    </script>
+</body>
+</html>
