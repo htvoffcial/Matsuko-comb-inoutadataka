@@ -147,12 +147,14 @@
         }
 
         function convertToCartesian(data) {
+            // 新フォーマット {session_start, mode, landmarks, logs} と旧フォーマット [{d,h,p},...] の両方に対応
+            const entries = Array.isArray(data) ? data : (data.logs || []);
             let pts = [], cx = 0, cy = 0, cz = 0, lastD = 0;
-            data.forEach((d, i) => {
+            entries.forEach((d, i) => {
                 const step = (i === 0) ? d.d : (d.d - lastD);
                 lastD = d.d;
-                const hRad = (d.h * Math.PI) / 180;
-                const pRad = (d.p * Math.PI) / 180;
+                const hRad = ((d.h || 0) * Math.PI) / 180;
+                const pRad = ((d.p || 0) * Math.PI) / 180;
                 cx += step * Math.cos(pRad) * Math.sin(hRad);
                 cy -= step * Math.cos(pRad) * Math.cos(hRad);
                 cz += step * Math.sin(pRad);
