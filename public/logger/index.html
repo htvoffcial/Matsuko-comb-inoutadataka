@@ -146,8 +146,8 @@
         let stepCount = 0;
         let totalDistance = 0;
 
-        const STRIDE_WALK    = 0.75; // 徒歩歩幅(m)
-        const STRIDE_BICYCLE = 2.20; // 自転車1ペダル相当(m) - フォールバック用
+        const STRIDE_WALK                 = 0.75; // 徒歩歩幅(m)
+        const BICYCLE_ADVANCE_PER_PEDAL   = 2.20; // 自転車GPS未接続時のフォールバック距離(m/ペダル)
 
         let logs = JSON.parse(localStorage.getItem('survey_logs') || '[]');
 
@@ -165,7 +165,11 @@
         // 直近ピーク値で閾値を自動調整
         let recentPeaks  = [];
         const PEAK_KEEP  = 8;
-        let adaptiveThreshold = 2.5; // 動的閾値（高周波成分）
+        // ピーク平均に対する閾値の比率（低すぎると誤検知、高すぎると見逃し）
+        const THRESHOLD_RATIO      = 0.55;
+        const MIN_ADAPTIVE_THRESHOLD = 1.0;
+        const MAX_ADAPTIVE_THRESHOLD = 5.0;
+        let adaptiveThreshold = 2.5; // 動的閾値（高周波成分、初期値）
 
         const MIN_STEP_INTERVAL_WALK = 250;  // ms
         const MIN_STEP_INTERVAL_BIKE = 400;  // ms
@@ -181,6 +185,7 @@
 
         // ----- Wake Lock -----
         let wakeLockSentinel = null;
+        let wakeLockEnabled  = false;  // 意図的なON/OFF状態を追跡
 
         // ----- 移動モード -----
         let measurementMode = 'walk'; // 'walk' | 'bicycle'
@@ -267,8 +272,8 @@
                     if (recentPeaks.length > PEAK_KEEP) recentPeaks.shift();
                     if (recentPeaks.length >= 3) {
                         const avg = recentPeaks.reduce((a, b) => a + b, 0) / recentPeaks.length;
-                        adaptiveThreshold = avg * 0.55; // ピーク平均の55%を閾値に
-                        adaptiveThreshold = Math.max(1.0, Math.min(5.0, adaptiveThreshold));
+                        adaptiveThreshold = avg * THRESHOLD_RATIO;
+                        adaptiveThreshold = Math.max(MIN_ADAPTIVE_THRESHOLD, Math.min(MAX_ADAPTIVE_THRESHOLD, adaptiveThreshold));
                     }
                     onStepDetected();
                     lastStepTime = now;
@@ -288,7 +293,7 @@
                 totalDistance = stepCount * STRIDE_WALK;
             } else if (gpsWatchId === null) {
                 // GPS未利用のフォールバック
-                totalDistance = stepCount * STRIDE_BICYCLE;
+                totalDistance = stepCount * BICYCLE_ADVANCE_PER_PEDAL;
             }
 
             document.getElementById('val-steps').innerText    = stepCount;
@@ -313,6 +318,9 @@
             return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
         }
 
+        // GPS更新の最小移動距離（これ未満のノイズは無視する）
+        const MIN_GPS_DISTANCE_THRESHOLD = 0.5; // m
+
         function startGPSWatch() {
             if (!navigator.geolocation) return;
             gpsWatchId = navigator.geolocation.watchPosition((pos) => {
@@ -321,7 +329,7 @@
                         lastGPSPos.coords.latitude, lastGPSPos.coords.longitude,
                         pos.coords.latitude,        pos.coords.longitude
                     );
-                    if (dist >= 0.5) { // 0.5m以上移動したとき更新
+                    if (dist >= MIN_GPS_DISTANCE_THRESHOLD) {
                         totalDistance += dist;
                         document.getElementById('val-distance').innerText = totalDistance.toFixed(1) + 'm';
                         if (isRecording) {
@@ -439,28 +447,37 @@
         };
 
         // ===== スリープ防止 (Wake Lock) =====
+        function setWakeLockButtonState(isActive) {
+            if (isActive) {
+                btnWakeLock.innerText   = '☀️ スリープ防止: ON';
+                btnWakeLock.className   = 'flex-1 bg-yellow-600 hover:bg-yellow-500 p-3 rounded-xl text-sm font-bold transition';
+            } else {
+                btnWakeLock.innerText   = '🌙 スリープ防止: OFF';
+                btnWakeLock.className   = 'flex-1 bg-indigo-700 hover:bg-indigo-600 p-3 rounded-xl text-sm font-bold transition';
+            }
+        }
+
         btnWakeLock.onclick = async () => {
-            if (wakeLockSentinel !== null) {
+            if (wakeLockEnabled) {
                 // 解除
-                await wakeLockSentinel.release();
-                wakeLockSentinel = null;
-                btnWakeLock.innerText = '🌙 スリープ防止: OFF';
-                btnWakeLock.className = 'flex-1 bg-indigo-700 hover:bg-indigo-600 p-3 rounded-xl text-sm font-bold transition';
+                if (wakeLockSentinel !== null) {
+                    await wakeLockSentinel.release();
+                    wakeLockSentinel = null;
+                }
+                wakeLockEnabled = false;
+                setWakeLockButtonState(false);
                 addLogMessage("💤 スリープ防止を解除しました");
             } else {
                 if ('wakeLock' in navigator) {
                     try {
                         wakeLockSentinel = await navigator.wakeLock.request('screen');
                         wakeLockSentinel.addEventListener('release', () => {
-                            // 画面が他の理由でスリープしたとき
-                            if (wakeLockSentinel !== null) {
-                                wakeLockSentinel = null;
-                                btnWakeLock.innerText = '🌙 スリープ防止: OFF';
-                                btnWakeLock.className = 'flex-1 bg-indigo-700 hover:bg-indigo-600 p-3 rounded-xl text-sm font-bold transition';
-                            }
+                            // 画面が他の理由でスリープしたとき（意図した解除でなければ表示を戻す）
+                            wakeLockSentinel = null;
+                            if (!wakeLockEnabled) setWakeLockButtonState(false);
                         });
-                        btnWakeLock.innerText = '☀️ スリープ防止: ON';
-                        btnWakeLock.className = 'flex-1 bg-yellow-600 hover:bg-yellow-500 p-3 rounded-xl text-sm font-bold transition';
+                        wakeLockEnabled = true;
+                        setWakeLockButtonState(true);
                         addLogMessage("☀️ スリープ防止を有効にしました（画面常時点灯）");
                     } catch (err) {
                         addLogMessage('⚠ Wake Lock エラー: ' + err.message);
@@ -473,8 +490,8 @@
 
         // ページを再表示したとき Wake Lock を再取得
         document.addEventListener('visibilitychange', async () => {
-            if (document.visibilityState === 'visible' && wakeLockSentinel === null &&
-                btnWakeLock.innerText.includes('ON') && 'wakeLock' in navigator) {
+            if (document.visibilityState === 'visible' && wakeLockEnabled &&
+                wakeLockSentinel === null && 'wakeLock' in navigator) {
                 try {
                     wakeLockSentinel = await navigator.wakeLock.request('screen');
                 } catch(e) {}
