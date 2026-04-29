@@ -24,17 +24,47 @@
             transform: scale(1.2);
             color: #4ade80;
         }
+        #map-preview {
+            max-height: 180px;
+            object-fit: contain;
+            border-radius: 0.75rem;
+            width: 100%;
+            display: none;
+        }
+        select.mode-select {
+            background: rgba(255,255,255,0.08);
+            border: 1px solid rgba(255,255,255,0.2);
+            color: #e6e6e6;
+            border-radius: 0.75rem;
+            padding: 0.5rem 0.75rem;
+            font-size: 0.9rem;
+            outline: none;
+            width: 100%;
+        }
+        select.mode-select option {
+            background: #1a1a2e;
+            color: #e6e6e6;
+        }
     </style>
 </head>
 <body class="p-4">
     <div class="max-w-md mx-auto">
-        <header class="mb-6 text-center">
+        <header class="mb-4 text-center">
             <h1 class="text-2xl font-bold text-blue-400">松高コン部：伊能プロジェクト</h1>
-            <p class="text-xs opacity-70">歩行測量データコレクター v1.0</p>
+            <p class="text-xs opacity-70">測量データコレクター v2.0</p>
         </header>
 
+        <!-- 移動モード選択 -->
+        <div class="data-card p-3 rounded-xl mb-4 flex items-center gap-3">
+            <span class="text-xs opacity-70 whitespace-nowrap">移動モード</span>
+            <select id="mode-select" class="mode-select">
+                <option value="walk">🚶 徒歩</option>
+                <option value="bicycle">🚴 自転車</option>
+            </select>
+        </div>
+
         <!-- リアルタイムモニター -->
-        <div class="grid grid-cols-2 gap-4 mb-6">
+        <div class="grid grid-cols-2 gap-3 mb-4">
             <div class="data-card p-4 rounded-xl text-center">
                 <div class="text-xs uppercase opacity-60">方向 (Heading)</div>
                 <div id="val-heading" class="text-2xl font-mono">0°</div>
@@ -44,8 +74,8 @@
                 <div id="val-pitch" class="text-2xl font-mono">0°</div>
             </div>
             <div class="data-card p-4 rounded-xl text-center">
-                <div class="text-xs uppercase opacity-60 text-green-400">歩数 (Steps)</div>
-                <div id="val-steps" class="text-2xl font-mono">0</div>
+                <div class="text-xs uppercase opacity-60 text-green-400" id="label-steps">歩数 (Steps)</div>
+                <div id="val-steps" class="text-2xl font-mono step-indicator">0</div>
             </div>
             <div class="data-card p-4 rounded-xl text-center">
                 <div class="text-xs uppercase opacity-60 text-blue-400">推定距離</div>
@@ -53,13 +83,20 @@
             </div>
         </div>
 
-        <!-- グラフ簡易表示用 (標高イメージ) -->
-        <div class="data-card p-2 rounded-xl mb-6 h-24 flex items-end justify-center gap-1 overflow-hidden" id="mini-graph">
-            <!-- 棒グラフがここに入る -->
+        <!-- 開始時GPS情報 -->
+        <div id="gps-info" class="data-card p-3 rounded-xl mb-4 text-[10px] font-mono hidden">
+            <div class="opacity-60 mb-1">📍 開始地点 GPS</div>
+            <div id="gps-detail">取得中...</div>
+        </div>
+
+        <!-- グラフ / 簡易マップ -->
+        <div class="data-card p-2 rounded-xl mb-4 overflow-hidden" id="graph-container">
+            <div class="h-24 flex items-end justify-center gap-1 overflow-hidden" id="mini-graph"></div>
+            <img id="map-preview" alt="読み込んだ地図">
         </div>
 
         <!-- コントロール -->
-        <div class="flex flex-col gap-4">
+        <div class="flex flex-col gap-3">
             <button id="btn-request" class="bg-yellow-600 hover:bg-yellow-500 p-4 rounded-xl font-bold transition">
                 センサー許可を取得
             </button>
@@ -73,6 +110,17 @@
                 </button>
             </div>
 
+            <!-- 補助ボタン列 -->
+            <div class="flex gap-2">
+                <button id="btn-wakelockmap" class="flex-1 bg-indigo-700 hover:bg-indigo-600 p-3 rounded-xl text-sm font-bold transition">
+                    🌙 スリープ防止: OFF
+                </button>
+                <label class="flex-1 bg-teal-700 hover:bg-teal-600 p-3 rounded-xl text-sm font-bold transition text-center cursor-pointer">
+                    🗺 地図読み込み
+                    <input type="file" id="map-input" accept="image/*" class="hidden">
+                </label>
+            </div>
+
             <div class="flex gap-2">
                 <button id="btn-export" class="flex-1 border border-blue-500 text-blue-400 p-2 rounded-lg text-sm">
                     JSONを保存
@@ -84,7 +132,7 @@
         </div>
 
         <!-- ログ表示 -->
-        <div class="mt-8">
+        <div class="mt-6">
             <h2 class="text-sm font-bold mb-2 opacity-60">直近のログ (LocalStorage)</h2>
             <div id="log-display" class="text-[10px] font-mono bg-black p-2 rounded h-32 overflow-y-auto opacity-80">
                 記録を開始してください...
@@ -93,130 +141,379 @@
     </div>
 
     <script>
+        // ===== 状態管理 =====
         let isRecording = false;
         let stepCount = 0;
         let totalDistance = 0;
-        let strideLength = 0.65; // 歩幅(m) - 設定で変更可能にすると良い
+
+        const STRIDE_WALK                 = 0.75; // 徒歩歩幅(m)
+        const BICYCLE_ADVANCE_PER_PEDAL   = 2.20; // 自転車GPS未接続時のフォールバック距離(m/ペダル)
+
         let logs = JSON.parse(localStorage.getItem('survey_logs') || '[]');
 
         let currentHeading = 0;
-        let currentPitch = 0;
-        let lastAccel = 0;
-        let stepThreshold = 12; // 歩法検知のしきい値
+        let currentPitch   = 0;
+
+        // ----- 高精度歩数検知 (適応型ピーク検出) -----
+        let accHistory   = [];       // 生加速度の短期履歴
+        const ACC_HIST   = 5;        // 移動平均ウィンドウ
+        let filteredAcc  = 9.8;      // ローパスフィルタ出力（初期値=重力）
+        const LP_ALPHA   = 0.85;     // ローパス係数（大きいほど滑らか）
+        let prevHighFreq = 0;        // 前回の高周波成分
+        let prevDelta    = 0;        // 前回の微分
+
+        // 直近ピーク値で閾値を自動調整
+        let recentPeaks  = [];
+        const PEAK_KEEP  = 8;
+        // ピーク平均に対する閾値の比率（低すぎると誤検知、高すぎると見逃し）
+        const THRESHOLD_RATIO      = 0.55;
+        const MIN_ADAPTIVE_THRESHOLD = 1.0;
+        const MAX_ADAPTIVE_THRESHOLD = 5.0;
+        let adaptiveThreshold = 2.5; // 動的閾値（高周波成分、初期値）
+
+        const MIN_STEP_INTERVAL_WALK = 250;  // ms
+        const MIN_STEP_INTERVAL_BIKE = 400;  // ms
         let lastStepTime = 0;
 
-        const btnRequest = document.getElementById('btn-request');
-        const btnStart = document.getElementById('btn-start');
-        const btnStop = document.getElementById('btn-stop');
-        const logDisplay = document.getElementById('log-display');
+        // ----- 自転車モード GPS -----
+        let gpsWatchId  = null;
+        let lastGPSPos  = null;
 
-        // iOSのセンサー許可対応
+        // ----- 開始時 GPS -----
+        let sessionStartGPS     = null;
+        let sessionStartHeading = null;
+
+        // ----- Wake Lock -----
+        let wakeLockSentinel = null;
+        let wakeLockEnabled  = false;  // 意図的なON/OFF状態を追跡
+
+        // ----- 移動モード -----
+        let measurementMode = 'walk'; // 'walk' | 'bicycle'
+
+        // ===== DOM 参照 =====
+        const btnRequest  = document.getElementById('btn-request');
+        const btnStart    = document.getElementById('btn-start');
+        const btnStop     = document.getElementById('btn-stop');
+        const logDisplay  = document.getElementById('log-display');
+        const modeSelect  = document.getElementById('mode-select');
+        const btnWakeLock = document.getElementById('btn-wakelockmap');
+
+        // ===== モード切替 =====
+        modeSelect.onchange = () => {
+            measurementMode = modeSelect.value;
+            const labelSteps = document.getElementById('label-steps');
+            if (measurementMode === 'bicycle') {
+                labelSteps.innerText = 'ペダル数';
+            } else {
+                labelSteps.innerText = '歩数 (Steps)';
+            }
+        };
+
+        // ===== センサー許可 =====
         btnRequest.onclick = async () => {
-            if (typeof DeviceOrientationEvent.requestPermission === 'function') {
-                const permission = await DeviceOrientationEvent.requestPermission();
-                if (permission === 'granted') {
-                    initSensors();
-                }
+            if (typeof DeviceOrientationEvent !== 'undefined' &&
+                typeof DeviceOrientationEvent.requestPermission === 'function') {
+                try {
+                    const perm = await DeviceOrientationEvent.requestPermission();
+                    if (perm === 'granted') initSensors();
+                } catch(e) { console.warn(e); }
             } else {
                 initSensors();
+            }
+            if (typeof DeviceMotionEvent !== 'undefined' &&
+                typeof DeviceMotionEvent.requestPermission === 'function') {
+                try { await DeviceMotionEvent.requestPermission(); } catch(e) {}
             }
             btnRequest.classList.add('hidden');
             btnStart.classList.remove('hidden');
         };
 
+        // ===== センサー初期化 =====
         function initSensors() {
-            // 方向と傾斜
             window.addEventListener('deviceorientation', (e) => {
-                // webkitCompassHeadingはiOS用、alphaはAndroid用(補正が必要な場合あり)
-                currentHeading = e.webkitCompassHeading || (360 - e.alpha);
-                currentPitch = e.beta; // 前後の傾き
+                currentHeading = e.webkitCompassHeading != null
+                    ? e.webkitCompassHeading
+                    : (360 - (e.alpha || 0));
+                currentPitch = e.beta || 0;
 
                 document.getElementById('val-heading').innerText = Math.round(currentHeading) + '°';
-                document.getElementById('val-pitch').innerText = Math.round(currentPitch) + '°';
+                document.getElementById('val-pitch').innerText   = Math.round(currentPitch)   + '°';
             });
 
-            // 歩数検知（加速度センサー）
-            window.addEventListener('devicemotion', (e) => {
-                const acc = e.accelerationIncludingGravity;
-                if (!acc) return;
+            window.addEventListener('devicemotion', handleMotion);
+        }
 
-                // 3軸の合成加速度
-                const totalAcc = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2);
-                const delta = totalAcc - lastAccel;
-                lastAccel = totalAcc;
+        // ===== 高精度加速度処理 =====
+        function handleMotion(e) {
+            const acc = e.accelerationIncludingGravity;
+            if (!acc || acc.x == null) return;
 
-                const now = Date.now();
-                // 単純なピーク検知による歩数カウント
-                if (totalAcc > stepThreshold && (now - lastStepTime) > 300) {
+            const rawAcc = Math.sqrt(acc.x**2 + acc.y**2 + acc.z**2);
+
+            // ローパスフィルタ → 重力成分の推定
+            filteredAcc = LP_ALPHA * filteredAcc + (1 - LP_ALPHA) * rawAcc;
+
+            // ハイパスフィルタ → 動的加速度成分
+            const highFreq = rawAcc - filteredAcc;
+
+            // 微分（変化量）
+            const delta = highFreq - prevHighFreq;
+
+            // ゼロ交差上昇（ピーク後の検出: 前回正→今回負 かつ 前回がピークを超えていた）
+            const now = Date.now();
+            const minInterval = (measurementMode === 'bicycle')
+                ? MIN_STEP_INTERVAL_BIKE
+                : MIN_STEP_INTERVAL_WALK;
+
+            if (prevDelta > 0 && delta <= 0 && prevHighFreq > adaptiveThreshold) {
+                if ((now - lastStepTime) >= minInterval) {
+                    // 閾値を動的更新
+                    recentPeaks.push(prevHighFreq);
+                    if (recentPeaks.length > PEAK_KEEP) recentPeaks.shift();
+                    if (recentPeaks.length >= 3) {
+                        const avg = recentPeaks.reduce((a, b) => a + b, 0) / recentPeaks.length;
+                        adaptiveThreshold = avg * THRESHOLD_RATIO;
+                        adaptiveThreshold = Math.max(MIN_ADAPTIVE_THRESHOLD, Math.min(MAX_ADAPTIVE_THRESHOLD, adaptiveThreshold));
+                    }
                     onStepDetected();
                     lastStepTime = now;
                 }
-            });
+            }
+
+            prevHighFreq = highFreq;
+            prevDelta    = delta;
         }
 
+        // ===== 1歩（or 1ペダル）検出時の処理 =====
         function onStepDetected() {
+            // 自転車モードはGPS距離優先 → 加速度はカウントのみ
             stepCount++;
-            totalDistance = stepCount * strideLength;
-            
-            document.getElementById('val-steps').innerText = stepCount;
+
+            if (measurementMode === 'walk') {
+                totalDistance = stepCount * STRIDE_WALK;
+            } else if (gpsWatchId === null) {
+                // GPS未利用のフォールバック
+                totalDistance = stepCount * BICYCLE_ADVANCE_PER_PEDAL;
+            }
+
+            document.getElementById('val-steps').innerText    = stepCount;
             document.getElementById('val-distance').innerText = totalDistance.toFixed(1) + 'm';
 
-            // 記録中の場合は保存
             if (isRecording) {
-                const record = {
-                    t: Date.now(),
-                    s: stepCount,
-                    d: parseFloat(totalDistance.toFixed(2)),
-                    h: Math.round(currentHeading),
-                    p: Math.round(currentPitch)
-                };
-                logs.push(record);
-                saveLogs();
-                updateLogDisplay();
+                pushRecord();
                 addGraphPoint(currentPitch);
             }
 
-            // 視覚的フィードバック
             document.getElementById('val-steps').classList.add('step-active');
             setTimeout(() => document.getElementById('val-steps').classList.remove('step-active'), 100);
         }
 
+        // ===== GPS距離計算 (自転車モード) =====
+        function haversine(lat1, lon1, lat2, lon2) {
+            const R = 6371000; // m
+            const dLat = (lat2 - lat1) * Math.PI / 180;
+            const dLon = (lon2 - lon1) * Math.PI / 180;
+            const a = Math.sin(dLat/2)**2 +
+                      Math.cos(lat1*Math.PI/180) * Math.cos(lat2*Math.PI/180) * Math.sin(dLon/2)**2;
+            return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        }
+
+        // GPS更新の最小移動距離（これ未満のノイズは無視する）
+        const MIN_GPS_DISTANCE_THRESHOLD = 0.5; // m
+
+        function startGPSWatch() {
+            if (!navigator.geolocation) return;
+            gpsWatchId = navigator.geolocation.watchPosition((pos) => {
+                if (lastGPSPos !== null) {
+                    const dist = haversine(
+                        lastGPSPos.coords.latitude, lastGPSPos.coords.longitude,
+                        pos.coords.latitude,        pos.coords.longitude
+                    );
+                    if (dist >= MIN_GPS_DISTANCE_THRESHOLD) {
+                        totalDistance += dist;
+                        document.getElementById('val-distance').innerText = totalDistance.toFixed(1) + 'm';
+                        if (isRecording) {
+                            pushRecord(pos.coords);
+                            addGraphPoint(currentPitch);
+                        }
+                    }
+                }
+                lastGPSPos = pos;
+            }, (err) => {
+                addLogMessage('⚠ GPS エラー: ' + err.message);
+            }, { enableHighAccuracy: true, maximumAge: 0 });
+        }
+
+        function stopGPSWatch() {
+            if (gpsWatchId !== null) {
+                navigator.geolocation.clearWatch(gpsWatchId);
+                gpsWatchId = null;
+                lastGPSPos = null;
+            }
+        }
+
+        // ===== 記録を logs に追加 =====
+        function pushRecord(gpsCoordsOrNull) {
+            const record = {
+                t: Date.now(),
+                s: stepCount,
+                d: parseFloat(totalDistance.toFixed(2)),
+                h: Math.round(currentHeading),
+                p: Math.round(currentPitch)
+            };
+            if (gpsCoordsOrNull) {
+                record.lat = gpsCoordsOrNull.latitude;
+                record.lon = gpsCoordsOrNull.longitude;
+                record.acc = gpsCoordsOrNull.accuracy;
+            }
+            logs.push(record);
+            saveLogs();
+            updateLogDisplay();
+        }
+
+        // ===== ログ保存 =====
         function saveLogs() {
             localStorage.setItem('survey_logs', JSON.stringify(logs));
         }
 
+        // ===== ログ表示更新 =====
         function updateLogDisplay() {
             const lastLogs = logs.slice(-5).reverse();
-            logDisplay.innerHTML = lastLogs.map(l => 
-                `[${new Date(l.t).toLocaleTimeString()}] Dist:${l.d}m Dir:${l.h}° Pitch:${l.p}°`
-            ).join('<br>');
+            logDisplay.innerHTML = lastLogs.map(l => {
+                let line = `[${new Date(l.t).toLocaleTimeString()}] Dist:${l.d}m Dir:${l.h}° Pitch:${l.p}°`;
+                if (l.lat != null) line += ` GPS:(${l.lat.toFixed(5)},${l.lon.toFixed(5)})`;
+                return line;
+            }).join('<br>');
         }
 
+        // ===== グラフ更新 =====
         function addGraphPoint(pitch) {
             const bar = document.createElement('div');
-            bar.className = 'bg-blue-500 w-1';
-            // 傾斜を高さに反映 (0度を中央に)
+            bar.className = 'bg-blue-500 w-1 flex-shrink-0';
             const height = 50 + (pitch * 2);
             bar.style.height = Math.max(5, Math.min(100, height)) + '%';
             const graph = document.getElementById('mini-graph');
             graph.appendChild(bar);
-            if (graph.children.length > 30) graph.removeChild(graph.firstChild);
+            if (graph.children.length > 60) graph.removeChild(graph.firstChild);
         }
 
-        btnStart.onclick = () => {
+        // ===== 記録開始 =====
+        btnStart.onclick = async () => {
             isRecording = true;
             btnStart.classList.add('hidden');
             btnStop.classList.remove('hidden');
-            addLogMessage("--- 記録開始 ---");
+
+            // 開始時GPS+方角を取得
+            sessionStartHeading = Math.round(currentHeading);
+            if (navigator.geolocation) {
+                const gpsInfoBox = document.getElementById('gps-info');
+                gpsInfoBox.classList.remove('hidden');
+                document.getElementById('gps-detail').innerText = '取得中...';
+                navigator.geolocation.getCurrentPosition((pos) => {
+                    sessionStartGPS = {
+                        lat: pos.coords.latitude,
+                        lon: pos.coords.longitude,
+                        acc: pos.coords.accuracy,
+                        heading: sessionStartHeading
+                    };
+                    document.getElementById('gps-detail').innerText =
+                        `緯度: ${pos.coords.latitude.toFixed(6)}\n` +
+                        `経度: ${pos.coords.longitude.toFixed(6)}\n` +
+                        `精度: ±${pos.coords.accuracy.toFixed(1)}m  方角: ${sessionStartHeading}°`;
+                    // セッションメタをlocalStorageに保存
+                    localStorage.setItem('session_start_gps', JSON.stringify(sessionStartGPS));
+                    addLogMessage(`📍 GPS取得完了 (±${pos.coords.accuracy.toFixed(1)}m)`);
+                }, (err) => {
+                    document.getElementById('gps-detail').innerText = 'GPS取得失敗: ' + err.message;
+                }, { enableHighAccuracy: true, timeout: 10000 });
+            }
+
+            // 自転車モードはGPS追跡開始
+            if (measurementMode === 'bicycle') {
+                startGPSWatch();
+                addLogMessage("🚴 自転車モードで記録開始");
+            } else {
+                addLogMessage("🚶 徒歩モードで記録開始");
+            }
         };
 
+        // ===== 記録停止 =====
         btnStop.onclick = () => {
             isRecording = false;
             btnStop.classList.add('hidden');
             btnStart.classList.remove('hidden');
+            if (measurementMode === 'bicycle') stopGPSWatch();
             addLogMessage("--- 記録停止 ---");
         };
 
+        // ===== スリープ防止 (Wake Lock) =====
+        function setWakeLockButtonState(isActive) {
+            if (isActive) {
+                btnWakeLock.innerText   = '☀️ スリープ防止: ON';
+                btnWakeLock.className   = 'flex-1 bg-yellow-600 hover:bg-yellow-500 p-3 rounded-xl text-sm font-bold transition';
+            } else {
+                btnWakeLock.innerText   = '🌙 スリープ防止: OFF';
+                btnWakeLock.className   = 'flex-1 bg-indigo-700 hover:bg-indigo-600 p-3 rounded-xl text-sm font-bold transition';
+            }
+        }
+
+        btnWakeLock.onclick = async () => {
+            if (wakeLockEnabled) {
+                // 解除
+                if (wakeLockSentinel !== null) {
+                    await wakeLockSentinel.release();
+                    wakeLockSentinel = null;
+                }
+                wakeLockEnabled = false;
+                setWakeLockButtonState(false);
+                addLogMessage("💤 スリープ防止を解除しました");
+            } else {
+                if ('wakeLock' in navigator) {
+                    try {
+                        wakeLockSentinel = await navigator.wakeLock.request('screen');
+                        wakeLockSentinel.addEventListener('release', () => {
+                            // 画面が他の理由でスリープしたとき（意図した解除でなければ表示を戻す）
+                            wakeLockSentinel = null;
+                            if (!wakeLockEnabled) setWakeLockButtonState(false);
+                        });
+                        wakeLockEnabled = true;
+                        setWakeLockButtonState(true);
+                        addLogMessage("☀️ スリープ防止を有効にしました（画面常時点灯）");
+                    } catch (err) {
+                        addLogMessage('⚠ Wake Lock エラー: ' + err.message);
+                    }
+                } else {
+                    addLogMessage('⚠ このブラウザはWake Lock非対応です');
+                }
+            }
+        };
+
+        // ページを再表示したとき Wake Lock を再取得
+        document.addEventListener('visibilitychange', async () => {
+            if (document.visibilityState === 'visible' && wakeLockEnabled &&
+                wakeLockSentinel === null && 'wakeLock' in navigator) {
+                try {
+                    wakeLockSentinel = await navigator.wakeLock.request('screen');
+                } catch(e) {}
+            }
+        });
+
+        // ===== 地図読み込み =====
+        document.getElementById('map-input').onchange = (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (ev) => {
+                const img = document.getElementById('map-preview');
+                img.src = ev.target.result;
+                img.style.display = 'block';
+                document.getElementById('mini-graph').style.display = 'none';
+                addLogMessage('🗺 地図を読み込みました: ' + file.name);
+            };
+            reader.readAsDataURL(file);
+        };
+
+        // ===== ログメッセージ追加 =====
         function addLogMessage(msg) {
             const div = document.createElement('div');
             div.innerText = msg;
@@ -224,8 +521,14 @@
             logDisplay.prepend(div);
         }
 
+        // ===== JSONエクスポート =====
         document.getElementById('btn-export').onclick = () => {
-            const dataStr = JSON.stringify(logs, null, 2);
+            const exportData = {
+                session_start: sessionStartGPS || null,
+                mode: measurementMode,
+                logs: logs
+            };
+            const dataStr = JSON.stringify(exportData, null, 2);
 
             const now = new Date();
             const pad = (n) => String(n).padStart(2, '0');
@@ -235,31 +538,35 @@
 
             const blob = new Blob([dataStr], { type: 'application/json' });
             const url = URL.createObjectURL(blob);
-
             const a = document.createElement('a');
             a.href = url;
             a.download = fileName;
             document.body.appendChild(a);
             a.click();
             a.remove();
-
             URL.revokeObjectURL(url);
         };
 
+        // ===== クリア =====
         document.getElementById('btn-clear').onclick = () => {
             if (confirm("データを全消去しますか？")) {
                 logs = [];
                 saveLogs();
+                localStorage.removeItem('session_start_gps');
                 stepCount = 0;
                 totalDistance = 0;
-                document.getElementById('val-steps').innerText = "0";
+                sessionStartGPS = null;
+                recentPeaks = [];
+                adaptiveThreshold = 2.5;
+                document.getElementById('val-steps').innerText    = "0";
                 document.getElementById('val-distance').innerText = "0m";
+                document.getElementById('gps-info').classList.add('hidden');
                 logDisplay.innerHTML = "クリアされました";
                 document.getElementById('mini-graph').innerHTML = "";
             }
         };
 
-        // 初期ログ表示
+        // ===== 初期ログ表示 =====
         updateLogDisplay();
     </script>
 </body>
