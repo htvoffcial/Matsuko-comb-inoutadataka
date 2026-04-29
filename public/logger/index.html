@@ -45,6 +45,19 @@
             background: #1a1a2e;
             color: #e6e6e6;
         }
+        input.landmark-input {
+            background: rgba(255,255,255,0.08);
+            border: 1px solid rgba(255,255,255,0.2);
+            color: #e6e6e6;
+            border-radius: 0.75rem;
+            padding: 0.5rem 0.75rem;
+            font-size: 0.9rem;
+            outline: none;
+            width: 100%;
+        }
+        input.landmark-input::placeholder {
+            color: rgba(230,230,230,0.55);
+        }
     </style>
 </head>
 <body class="p-4">
@@ -80,6 +93,24 @@
             <div class="data-card p-4 rounded-xl text-center">
                 <div class="text-xs uppercase opacity-60 text-blue-400">推定距離</div>
                 <div id="val-distance" class="text-2xl font-mono">0m</div>
+            </div>
+        </div>
+
+        <!-- 名所（誤差補正/インデックス用） -->
+        <div class="data-card p-3 rounded-xl mb-4">
+            <div class="text-xs font-bold opacity-70 mb-2">📌 名所記録（誤差補正 / インデックス）</div>
+            <div class="flex gap-2 mb-2">
+                <input id="landmark-name" class="landmark-input" placeholder="例）〇〇橋 / 交差点A / 神社" maxlength="40">
+                <button id="btn-landmark" class="bg-purple-700 hover:bg-purple-600 px-3 rounded-xl text-sm font-bold transition whitespace-nowrap">
+                    記録
+                </button>
+            </div>
+            <div id="landmark-status" class="text-[10px] font-mono opacity-70 whitespace-pre-line">未記録</div>
+            <div class="mt-2">
+                <div class="text-[10px] font-mono opacity-60 mb-1">直近の名所（LocalStorage）</div>
+                <div id="landmark-display" class="text-[10px] font-mono bg-black p-2 rounded h-20 overflow-y-auto opacity-80">
+                    まだ名所がありません
+                </div>
             </div>
         </div>
 
@@ -151,6 +182,9 @@
 
         let logs = JSON.parse(localStorage.getItem('survey_logs') || '[]');
 
+        // 名所（誤差補正/インデックス用）
+        let landmarks = JSON.parse(localStorage.getItem('survey_landmarks') || '[]');
+
         let currentHeading = 0;
         let currentPitch   = 0;
 
@@ -191,12 +225,16 @@
         let measurementMode = 'walk'; // 'walk' | 'bicycle'
 
         // ===== DOM 参照 =====
-        const btnRequest  = document.getElementById('btn-request');
-        const btnStart    = document.getElementById('btn-start');
-        const btnStop     = document.getElementById('btn-stop');
-        const logDisplay  = document.getElementById('log-display');
-        const modeSelect  = document.getElementById('mode-select');
-        const btnWakeLock = document.getElementById('btn-wakelockmap');
+        const btnRequest       = document.getElementById('btn-request');
+        const btnStart         = document.getElementById('btn-start');
+        const btnStop          = document.getElementById('btn-stop');
+        const logDisplay       = document.getElementById('log-display');
+        const modeSelect       = document.getElementById('mode-select');
+        const btnWakeLock      = document.getElementById('btn-wakelockmap');
+        const landmarkName     = document.getElementById('landmark-name');
+        const btnLandmark      = document.getElementById('btn-landmark');
+        const landmarkStatus   = document.getElementById('landmark-status');
+        const landmarkDisplay  = document.getElementById('landmark-display');
 
         // ===== モード切替 =====
         modeSelect.onchange = () => {
@@ -386,6 +424,128 @@
             }).join('<br>');
         }
 
+        // ===== 名所保存 =====
+        function saveLandmarks() {
+            localStorage.setItem('survey_landmarks', JSON.stringify(landmarks));
+        }
+
+        function updateLandmarkDisplay() {
+            const last = landmarks.slice(-5).reverse();
+            if (last.length === 0) {
+                landmarkDisplay.innerText = 'まだ名所がありません';
+                return;
+            }
+            landmarkDisplay.innerHTML = last.map(l => {
+                const time = new Date(l.t).toLocaleTimeString();
+                return `[${time}] ${escapeHtml(l.name)}  GPS:(${l.lat.toFixed(6)},${l.lon.toFixed(6)}) ±${l.acc.toFixed(1)}m  Dir:${l.heading}°`;
+            }).join('<br>');
+        }
+
+        function escapeHtml(str) {
+            return String(str)
+                .replaceAll('&', '&amp;')
+                .replaceAll('<', '&lt;')
+                .replaceAll('>', '&gt;')
+                .replaceAll('"', '&quot;')
+                .replaceAll("'", '&#39;');
+        }
+
+        // 精度が良くなるまで少し待つ（タイムアウト付き）
+        async function getAccuratePosition({
+            desiredAccuracy = 10, // m（これ以下になったら採用）
+            timeoutMs = 15000,
+            maxAttempts = 8,
+        } = {}) {
+            if (!navigator.geolocation) throw new Error('Geolocation非対応');
+
+            const end = Date.now() + timeoutMs;
+            let best = null;
+            let attempts = 0;
+
+            while (Date.now() < end && attempts < maxAttempts) {
+                attempts++;
+                const pos = await new Promise((resolve, reject) => {
+                    navigator.geolocation.getCurrentPosition(resolve, reject, {
+                        enableHighAccuracy: true,
+                        maximumAge: 0,
+                        timeout: Math.max(2000, Math.min(8000, end - Date.now()))
+                    });
+                });
+
+                if (!best || pos.coords.accuracy < best.coords.accuracy) best = pos;
+
+                if (pos.coords.accuracy <= desiredAccuracy) {
+                    return { pos, attempts, bestAcc: pos.coords.accuracy };
+                }
+
+                // 少し待って再取得
+                await new Promise(r => setTimeout(r, 800));
+            }
+
+            if (best) return { pos: best, attempts, bestAcc: best.coords.accuracy };
+            throw new Error('GPS取得失敗');
+        }
+
+        async function recordLandmark() {
+            const name = (landmarkName.value || '').trim();
+            if (!name) {
+                alert('名所の名前を入力してください');
+                landmarkName.focus();
+                return;
+            }
+            if (!navigator.geolocation) {
+                addLogMessage('⚠ この端末/ブラウザはGPS非対応です');
+                return;
+            }
+
+            btnLandmark.disabled = true;
+            btnLandmark.classList.add('opacity-60');
+            landmarkStatus.innerText = 'GPS取得中...（精度が良くなるまで待機）';
+
+            try {
+                const desired = (measurementMode === 'bicycle') ? 15 : 10;
+                const { pos, attempts, bestAcc } = await getAccuratePosition({
+                    desiredAccuracy: desired,
+                    timeoutMs: 20000,
+                    maxAttempts: 10,
+                });
+
+                const heading = Math.round(currentHeading);
+                const landmark = {
+                    t: Date.now(),
+                    name,
+                    lat: pos.coords.latitude,
+                    lon: pos.coords.longitude,
+                    acc: pos.coords.accuracy,
+                    heading,
+                };
+
+                landmarks.push(landmark);
+                saveLandmarks();
+                updateLandmarkDisplay();
+
+                landmarkStatus.innerText =
+                    `✅ 記録しました（試行:${attempts}, 最良精度:±${bestAcc.toFixed(1)}m）\n` +
+                    `名所: ${name}\n` +
+                    `緯度: ${landmark.lat.toFixed(6)} / 経度: ${landmark.lon.toFixed(6)}\n` +
+                    `精度: ±${landmark.acc.toFixed(1)}m / 方角: ${heading}°`;
+
+                addLogMessage(`📌 名所を記録: ${name} (±${landmark.acc.toFixed(1)}m / ${heading}°)`);
+                landmarkName.value = '';
+            } catch (e) {
+                landmarkStatus.innerText = '❌ 名所GPS取得失敗: ' + (e?.message || e);
+                addLogMessage('⚠ 名所GPS取得失敗: ' + (e?.message || e));
+            } finally {
+                btnLandmark.disabled = false;
+                btnLandmark.classList.remove('opacity-60');
+            }
+        }
+
+        btnLandmark.onclick = recordLandmark;
+        landmarkName.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') recordLandmark();
+        });
+
         // ===== グラフ更新 =====
         function addGraphPoint(pitch) {
             const bar = document.createElement('div');
@@ -526,6 +686,7 @@
             const exportData = {
                 session_start: sessionStartGPS || null,
                 mode: measurementMode,
+                landmarks: landmarks,
                 logs: logs
             };
             const dataStr = JSON.stringify(exportData, null, 2);
@@ -553,6 +714,10 @@
                 logs = [];
                 saveLogs();
                 localStorage.removeItem('session_start_gps');
+
+                landmarks = [];
+                saveLandmarks();
+
                 stepCount = 0;
                 totalDistance = 0;
                 sessionStartGPS = null;
@@ -563,11 +728,15 @@
                 document.getElementById('gps-info').classList.add('hidden');
                 logDisplay.innerHTML = "クリアされました";
                 document.getElementById('mini-graph').innerHTML = "";
+
+                landmarkStatus.innerText = '未記録';
+                updateLandmarkDisplay();
             }
         };
 
         // ===== 初期ログ表示 =====
         updateLogDisplay();
+        updateLandmarkDisplay();
     </script>
 </body>
 </html>
