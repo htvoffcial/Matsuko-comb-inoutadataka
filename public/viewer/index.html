@@ -201,7 +201,7 @@
         function latLonToMeters(lat, lon, originLat, originLon) {
             const R = 6371000;
             const x = R * (lon - originLon) * Math.PI / 180 * Math.cos(originLat * Math.PI / 180);
-            const y = -R * (lat - originLat) * Math.PI / 180; // 北が上 → canvas y は下増加なので反転
+            const y = -R * (lat - originLat) * Math.PI / 180; // 負符号: canvas は y 下向きのため、北を上にするには緯度差を反転
             return { x, y };
         }
 
@@ -438,7 +438,7 @@
             ctxMap.setLineDash([]);
 
             // ラベル（ワールド座標のまま、フォントサイズで補正）
-            const fontSize = Math.max(8, Math.min(11, 9)) / viewState.zoom;
+            const fontSize = 9 / viewState.zoom;
             ctxMap.fillStyle = '#94a3b8';
             ctxMap.font = `${fontSize}px sans-serif`;
 
@@ -768,12 +768,12 @@
                     const currDist = Math.hypot(t0.clientX - t1.clientX, t0.clientY - t1.clientY);
                     const scale = currDist / (prevDist || 1);
                     const cx = (t0.clientX + t1.clientX) / 2 - rect.left;
-                    const cy2 = (t0.clientY + t1.clientY) / 2 - rect.top;
+                    const centerY = (t0.clientY + t1.clientY) / 2 - rect.top;
                     const wx = (cx - viewState.x) / viewState.zoom;
-                    const wy = (cy2 - viewState.y) / viewState.zoom;
+                    const wy = (centerY - viewState.y) / viewState.zoom;
                     viewState.zoom *= scale;
                     viewState.x = cx - wx * viewState.zoom;
-                    viewState.y = cy2 - wy * viewState.zoom;
+                    viewState.y = centerY - wy * viewState.zoom;
                     draw();
                 }
             }
