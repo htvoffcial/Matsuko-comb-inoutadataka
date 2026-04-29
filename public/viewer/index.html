@@ -25,10 +25,6 @@
             border-color: #3b82f6;
             background: #eff6ff;
         }
-        .control-panel {
-            background: rgba(255, 255, 255, 0.8);
-            backdrop-filter: blur(8px);
-        }
     </style>
 </head>
 <body class="p-4 md:p-6">
@@ -38,13 +34,12 @@
                 <h1 class="text-3xl font-extrabold text-slate-800 tracking-tight">伊能忠敬プロジェクト <span class="text-blue-600">Viewer Pro</span></h1>
                 <p class="text-sm text-slate-500 font-medium">松高コン部：歩行測量データの可視化システム</p>
             </div>
-            
+
             <div id="drop-area" class="drop-zone px-6 py-4 rounded-2xl flex items-center gap-4 cursor-pointer shadow-sm hover:shadow-md">
                 <input type="file" id="file-input" accept=".json" class="hidden">
                 <div class="bg-blue-100 p-2 rounded-full">
                     <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6 text-blue-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d=" household-upload" />
-                        <path d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                     </svg>
                 </div>
                 <div>
@@ -59,7 +54,7 @@
             <div class="lg:col-span-1 space-y-4">
                 <div class="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
                     <h2 class="text-xs uppercase tracking-wider text-slate-400 font-bold mb-4">測量レポート</h2>
-                    <div class="space-y-4">
+                    <div class="space-y-3">
                         <div class="bg-slate-50 p-3 rounded-lg">
                             <div class="text-[10px] text-slate-400 uppercase font-bold">総距離</div>
                             <div id="stat-dist" class="text-2xl font-black text-slate-800">- <span class="text-sm font-normal">m</span></div>
@@ -74,6 +69,24 @@
                                 <div id="stat-gradient" class="text-lg font-bold text-blue-600">- %</div>
                             </div>
                         </div>
+                        <div class="bg-slate-50 p-3 rounded-lg">
+                            <div class="text-[10px] text-slate-400 uppercase font-bold">移動モード</div>
+                            <div id="stat-mode" class="text-sm font-bold text-slate-700">-</div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-3">
+                            <div class="bg-slate-50 p-3 rounded-lg">
+                                <div class="text-[10px] text-slate-400 uppercase font-bold">名所数</div>
+                                <div id="stat-landmarks" class="text-lg font-bold text-purple-600">-</div>
+                            </div>
+                            <div class="bg-slate-50 p-3 rounded-lg">
+                                <div class="text-[10px] text-slate-400 uppercase font-bold">データ点数</div>
+                                <div id="stat-points" class="text-lg font-bold text-slate-600">-</div>
+                            </div>
+                        </div>
+                        <div id="stat-gps-box" class="bg-blue-50 p-3 rounded-lg hidden">
+                            <div class="text-[10px] text-blue-400 uppercase font-bold">GPS開始地点</div>
+                            <div id="stat-gps" class="text-[10px] font-mono text-blue-700 break-all leading-relaxed">-</div>
+                        </div>
                     </div>
                 </div>
 
@@ -84,7 +97,7 @@
                         </svg>
                         地図を画像で保存
                     </button>
-                    <p class="text-[10px] text-center text-slate-400">マウスホイールで地図の拡大縮小が可能です</p>
+                    <p class="text-[10px] text-center text-slate-400">ホイール/ピンチで拡大縮小、ドラッグで移動</p>
                 </div>
             </div>
 
@@ -93,7 +106,7 @@
                 <!-- Map View -->
                 <div class="canvas-container h-[500px]">
                     <div class="absolute top-4 left-4 z-10 flex items-center gap-2">
-                        <span class="bg-white/90 px-3 py-1 rounded-full text-[10px] font-bold shadow-sm border border-slate-200">平面軌跡 (Top View)</span>
+                        <span class="bg-white/90 px-3 py-1 rounded-full text-[10px] font-bold shadow-sm border border-slate-200">平面図 (北上 / North Up)</span>
                         <span id="zoom-level" class="bg-white/90 px-3 py-1 rounded-full text-[10px] font-bold shadow-sm border border-slate-200 text-blue-600">Zoom: 100%</span>
                     </div>
                     <canvas id="canvas-map"></canvas>
@@ -102,7 +115,7 @@
                 <!-- Profile View -->
                 <div class="canvas-container h-[200px]">
                     <div class="absolute top-4 left-4 z-10">
-                        <span class="bg-white/90 px-3 py-1 rounded-full text-[10px] font-bold shadow-sm border border-slate-200">標高プロファイル (Profile)</span>
+                        <span class="bg-white/90 px-3 py-1 rounded-full text-[10px] font-bold shadow-sm border border-slate-200">標高プロファイル (Elevation Profile)</span>
                     </div>
                     <canvas id="canvas-elevation"></canvas>
                 </div>
@@ -119,10 +132,13 @@
         const dropArea = document.getElementById('drop-area');
         const fileLabel = document.getElementById('file-label');
 
-        let points = [];
+        let points = [];          // [{x, y, z, d, t}] — world coords in meters, north-up
+        let landmarkPoints = [];  // [{x, y, name, acc}]
+        let sessionMeta = null;   // {start:{lat,lon,acc,heading}, mode, landmarks:[]}
         let viewState = { x: 0, y: 0, zoom: 1.0, isDragging: false, lastMouse: { x: 0, y: 0 } };
         let bounds = { minX: 0, maxX: 0, minY: 0, maxY: 0, minZ: 0, maxZ: 0 };
 
+        // ===== キャンバス初期化 =====
         function initCanvas() {
             const dpr = window.devicePixelRatio || 1;
             canvasMap.width = canvasMap.clientWidth * dpr;
@@ -133,11 +149,10 @@
             ctxEle.scale(dpr, dpr);
             draw();
         }
-
         window.addEventListener('resize', initCanvas);
-        setTimeout(initCanvas, 100); // 初期描画待ち
+        setTimeout(initCanvas, 100);
 
-        // ファイル処理
+        // ===== ファイル処理 =====
         dropArea.onclick = () => fileInput.click();
         dropArea.ondragover = (e) => { e.preventDefault(); dropArea.classList.add('drag-over'); };
         dropArea.ondragleave = () => dropArea.classList.remove('drag-over');
@@ -152,171 +167,560 @@
             if (!files.length) return;
             const file = files[0];
             const reader = new FileReader();
-            reader.onload = (e) => {
+            reader.onload = (ev) => {
                 try {
-                    const data = JSON.parse(e.target.result);
+                    const data = JSON.parse(ev.target.result);
                     processData(data);
                     fileLabel.innerText = file.name;
-                } catch (err) { alert("JSON解析エラー"); }
+                } catch (err) { alert('JSON解析エラー: ' + err.message); }
             };
             reader.readAsText(file);
         }
 
+        // ===== ユーティリティ =====
+
+        // 「きりのよい」グリッド間隔を求める（targetDivisions 分割を目標）
+        function niceInterval(extent, targetDivisions) {
+            if (extent <= 0) return 1;
+            const raw = extent / targetDivisions;
+            const pow = Math.pow(10, Math.floor(Math.log10(raw)));
+            const norm = raw / pow;
+            if (norm < 1.5) return pow;
+            if (norm < 3.5) return 2 * pow;
+            if (norm < 7.5) return 5 * pow;
+            return 10 * pow;
+        }
+
+        // 距離を人間が読みやすい文字列に変換
+        function fmtDist(m) {
+            if (m >= 1000) return (m / 1000).toFixed(2) + 'km';
+            return m.toFixed(0) + 'm';
+        }
+
+        // 緯度経度 → 開始地点を原点とするメートル座標（北上・東右）
+        function latLonToMeters(lat, lon, originLat, originLon) {
+            const R = 6371000;
+            const x = R * (lon - originLon) * Math.PI / 180 * Math.cos(originLat * Math.PI / 180);
+            const y = -R * (lat - originLat) * Math.PI / 180; // 北が上 → canvas y は下増加なので反転
+            return { x, y };
+        }
+
+        // ===== データ処理 =====
         function processData(data) {
             points = [];
-            let cx = 0, cy = 0, cz = 0, lastD = 0;
+            landmarkPoints = [];
+            sessionMeta = null;
+
+            // 新旧フォーマット判定
+            let logEntries;
+            if (Array.isArray(data)) {
+                // 旧フォーマット: [{d, h, p}, ...]
+                logEntries = data.map(e => ({ t: 0, d: e.d, h: e.h, p: e.p }));
+            } else {
+                // 新フォーマット: {session_start, mode, landmarks, logs}
+                logEntries = data.logs || [];
+                sessionMeta = {
+                    start: data.session_start || null,
+                    mode: data.mode || 'walk',
+                    landmarks: data.landmarks || []
+                };
+            }
+
+            if (logEntries.length === 0) return;
+
+            // GPS 原点の決定
+            const hasGPSPoints = logEntries.some(e => e.lat != null);
+            let originLat = null, originLon = null;
+            if (sessionMeta && sessionMeta.start) {
+                originLat = sessionMeta.start.lat;
+                originLon = sessionMeta.start.lon;
+            } else if (hasGPSPoints) {
+                const first = logEntries.find(e => e.lat != null);
+                originLat = first.lat;
+                originLon = first.lon;
+            }
+
             bounds = { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity, minZ: Infinity, maxZ: -Infinity };
 
-            data.forEach((d, i) => {
-                const step = (i === 0) ? d.d : (d.d - lastD);
-                lastD = d.d;
-                const hRad = (d.h * Math.PI) / 180;
-                const pRad = (d.p * Math.PI) / 180;
-                const hDist = step * Math.cos(pRad);
-                cx += hDist * Math.sin(hRad);
-                cy -= hDist * Math.cos(hRad);
-                cz += step * Math.sin(pRad);
+            let cx = 0, cy = 0, cz = 0, lastD = 0;
 
-                points.push({ x: cx, y: cy, z: cz, d: d.d });
+            logEntries.forEach((entry, i) => {
+                const stepDist = (i === 0) ? entry.d : (entry.d - lastD);
+                lastD = entry.d;
+                const pRad = ((entry.p || 0) * Math.PI) / 180;
+
+                if (hasGPSPoints && entry.lat != null && originLat != null) {
+                    // GPS 座標をそのまま使用（自転車モード等）
+                    const pos = latLonToMeters(entry.lat, entry.lon, originLat, originLon);
+                    cx = pos.x;
+                    cy = pos.y;
+                    cz += stepDist * Math.sin(pRad);
+                } else {
+                    // 推測航法（dead reckoning）: 水平距離 = stepDist * cos(pitch)
+                    const hRad = ((entry.h || 0) * Math.PI) / 180;
+                    const hDist = stepDist * Math.cos(pRad);
+                    cx += hDist * Math.sin(hRad);   // 東方向
+                    cy -= hDist * Math.cos(hRad);   // 北方向（canvas 上向き）
+                    cz += stepDist * Math.sin(pRad);
+                }
+
+                points.push({ x: cx, y: cy, z: cz, d: entry.d, t: entry.t || 0 });
                 bounds.minX = Math.min(bounds.minX, cx); bounds.maxX = Math.max(bounds.maxX, cx);
                 bounds.minY = Math.min(bounds.minY, cy); bounds.maxY = Math.max(bounds.maxY, cy);
                 bounds.minZ = Math.min(bounds.minZ, cz); bounds.maxZ = Math.max(bounds.maxZ, cz);
             });
 
-            // 統計
-            const totalDist = points[points.length-1].d;
-            document.getElementById('stat-dist').innerHTML = `${totalDist.toFixed(1)} <span class="text-sm font-normal text-slate-400">m</span>`;
-            document.getElementById('stat-ele').innerText = `${(bounds.maxZ - bounds.minZ).toFixed(2)} m`;
-            document.getElementById('stat-gradient').innerText = `${((bounds.maxZ - bounds.minZ) / (totalDist || 1) * 100).toFixed(1)} %`;
+            // 名所を座標変換
+            if (sessionMeta && sessionMeta.landmarks.length > 0 && originLat != null) {
+                sessionMeta.landmarks.forEach(lm => {
+                    const pos = latLonToMeters(lm.lat, lm.lon, originLat, originLon);
+                    landmarkPoints.push({ x: pos.x, y: pos.y, name: lm.name, acc: lm.acc, heading: lm.heading });
+                    bounds.minX = Math.min(bounds.minX, pos.x); bounds.maxX = Math.max(bounds.maxX, pos.x);
+                    bounds.minY = Math.min(bounds.minY, pos.y); bounds.maxY = Math.max(bounds.maxY, pos.y);
+                });
+            }
 
-            // 自動フィット
-            const pad = 50;
-            const w = canvasMap.clientWidth - pad * 2;
-            const h = canvasMap.clientHeight - pad * 2;
-            const scale = Math.min(w / (bounds.maxX - bounds.minX || 1), h / (bounds.maxY - bounds.minY || 1));
-            viewState.zoom = scale;
-            viewState.x = canvasMap.clientWidth / 2 - ((bounds.maxX + bounds.minX) / 2) * scale;
-            viewState.y = canvasMap.clientHeight / 2 - ((bounds.maxY + bounds.minY) / 2) * scale;
-
+            updateStats();
+            autoFit();
             draw();
         }
 
+        // ===== 統計表示 =====
+        function updateStats() {
+            if (points.length === 0) return;
+            const totalDist = points[points.length - 1].d;
+            const elevRange = bounds.maxZ - bounds.minZ;
+            document.getElementById('stat-dist').innerHTML =
+                `${totalDist.toFixed(1)} <span class="text-sm font-normal text-slate-400">m</span>`;
+            document.getElementById('stat-ele').innerText = `${elevRange.toFixed(2)} m`;
+            document.getElementById('stat-gradient').innerText =
+                `${(elevRange / (totalDist || 1) * 100).toFixed(1)} %`;
+            document.getElementById('stat-points').innerText = points.length;
+
+            if (sessionMeta) {
+                const modeLabel = sessionMeta.mode === 'bicycle' ? '🚴 自転車' : '🚶 徒歩';
+                document.getElementById('stat-mode').innerText = modeLabel;
+                document.getElementById('stat-landmarks').innerText = landmarkPoints.length;
+
+                if (sessionMeta.start) {
+                    const s = sessionMeta.start;
+                    document.getElementById('stat-gps').innerText =
+                        `${s.lat.toFixed(6)}, ${s.lon.toFixed(6)}\n精度: ±${s.acc ? s.acc.toFixed(1) : '?'}m`;
+                    document.getElementById('stat-gps-box').classList.remove('hidden');
+                }
+            } else {
+                document.getElementById('stat-mode').innerText = '🚶 徒歩 (旧形式)';
+                document.getElementById('stat-landmarks').innerText = '0';
+            }
+        }
+
+        // ===== 自動フィット =====
+        function autoFit() {
+            if (points.length === 0) return;
+            const pad = 70;
+            const w = canvasMap.clientWidth - pad * 2;
+            const h = canvasMap.clientHeight - pad * 2;
+            const rangeX = bounds.maxX - bounds.minX || 1;
+            const rangeY = bounds.maxY - bounds.minY || 1;
+            const scale = Math.min(w / rangeX, h / rangeY);
+            viewState.zoom = scale;
+            viewState.x = canvasMap.clientWidth / 2 - ((bounds.maxX + bounds.minX) / 2) * scale;
+            viewState.y = canvasMap.clientHeight / 2 - ((bounds.maxY + bounds.minY) / 2) * scale;
+        }
+
+        // ===== 描画メイン =====
         function draw() {
             drawMap();
             drawElevation();
         }
 
+        // ----- 地図描画 -----
         function drawMap() {
-            ctxMap.clearRect(0, 0, canvasMap.clientWidth, canvasMap.clientHeight);
-            if (points.length < 2) return;
+            const w = canvasMap.clientWidth;
+            const h = canvasMap.clientHeight;
+            ctxMap.clearRect(0, 0, w, h);
+
+            // 地図背景
+            ctxMap.fillStyle = '#f0f4f8';
+            ctxMap.fillRect(0, 0, w, h);
 
             ctxMap.save();
             ctxMap.translate(viewState.x, viewState.y);
             ctxMap.scale(viewState.zoom, viewState.zoom);
 
-            // 道の枠（縁取り）
-            ctxMap.beginPath();
-            ctxMap.lineJoin = 'round';
-            ctxMap.lineCap = 'round';
-            ctxMap.strokeStyle = '#e2e8f0'; // 枠の色
-            ctxMap.lineWidth = 20 / viewState.zoom; // ズームしても太さを一定に保つ工夫
-            points.forEach((p, i) => {
-                if (i === 0) ctxMap.moveTo(p.x, p.y);
-                else ctxMap.lineTo(p.x, p.y);
-            });
-            ctxMap.stroke();
+            // グリッドと距離ラベル（ワールド座標内）
+            drawMapGrid(w, h);
 
-            // 道の中身
-            ctxMap.beginPath();
-            ctxMap.strokeStyle = '#ffffff'; // 中の色
-            ctxMap.lineWidth = 14 / viewState.zoom;
-            points.forEach((p, i) => {
-                if (i === 0) ctxMap.moveTo(p.x, p.y);
-                else ctxMap.lineTo(p.x, p.y);
-            });
-            ctxMap.stroke();
+            if (points.length >= 2) {
+                // 道路（外枠）
+                ctxMap.beginPath();
+                ctxMap.lineJoin = 'round';
+                ctxMap.lineCap = 'round';
+                ctxMap.strokeStyle = '#94a3b8';
+                ctxMap.lineWidth = 18 / viewState.zoom;
+                points.forEach((p, i) => {
+                    if (i === 0) ctxMap.moveTo(p.x, p.y);
+                    else ctxMap.lineTo(p.x, p.y);
+                });
+                ctxMap.stroke();
 
-            // 中心線（細いアクセント）
-            ctxMap.beginPath();
-            ctxMap.strokeStyle = '#3b82f6'; 
-            ctxMap.lineWidth = 2 / viewState.zoom;
-            points.forEach((p, i) => {
-                if (i === 0) ctxMap.moveTo(p.x, p.y);
-                else ctxMap.lineTo(p.x, p.y);
-            });
-            ctxMap.stroke();
+                // 道路（内側）
+                ctxMap.beginPath();
+                ctxMap.strokeStyle = '#f8fafc';
+                ctxMap.lineWidth = 12 / viewState.zoom;
+                points.forEach((p, i) => {
+                    if (i === 0) ctxMap.moveTo(p.x, p.y);
+                    else ctxMap.lineTo(p.x, p.y);
+                });
+                ctxMap.stroke();
 
-            // マーカー
-            drawMarker(ctxMap, points[0], '#10b981', 'START');
-            drawMarker(ctxMap, points[points.length-1], '#ef4444', 'END');
+                // 中心線
+                ctxMap.beginPath();
+                ctxMap.strokeStyle = '#3b82f6';
+                ctxMap.lineWidth = 2.5 / viewState.zoom;
+                points.forEach((p, i) => {
+                    if (i === 0) ctxMap.moveTo(p.x, p.y);
+                    else ctxMap.lineTo(p.x, p.y);
+                });
+                ctxMap.stroke();
+
+                // スタート／エンドマーカー
+                drawWorldMarker(points[0], '#10b981', 'START');
+                drawWorldMarker(points[points.length - 1], '#ef4444', 'END');
+            }
+
+            // 名所マーカー
+            landmarkPoints.forEach(lm => drawLandmarkMarker(lm));
 
             ctxMap.restore();
+
+            // 固定オーバーレイ（スクリーン座標）
+            drawNorthArrow(w, h);
+            if (points.length >= 2) drawScaleBar(w, h);
+
             document.getElementById('zoom-level').innerText = `Zoom: ${Math.round(viewState.zoom * 100)}%`;
         }
 
-        function drawMarker(ctx, p, color, label) {
-            const size = 6 / viewState.zoom;
-            ctx.fillStyle = color;
-            ctx.beginPath();
-            ctx.arc(p.x, p.y, size, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.strokeStyle = 'white';
-            ctx.lineWidth = 2 / viewState.zoom;
-            ctx.stroke();
+        // グリッド（ワールド座標変換済みコンテキスト内で描画）
+        function drawMapGrid(canvasW, canvasH) {
+            // 表示中のワールド範囲を逆算
+            const wl = -viewState.x / viewState.zoom;
+            const wt = -viewState.y / viewState.zoom;
+            const wr = (canvasW - viewState.x) / viewState.zoom;
+            const wb = (canvasH - viewState.y) / viewState.zoom;
+            const ww = wr - wl;
+            const wh = wb - wt;
+
+            const interval = niceInterval(Math.max(ww, wh), 8);
+
+            ctxMap.save();
+            ctxMap.strokeStyle = '#cbd5e1';
+            ctxMap.lineWidth = 0.4 / viewState.zoom;
+            ctxMap.setLineDash([3 / viewState.zoom, 5 / viewState.zoom]);
+
+            // 縦線（経度方向）
+            const x0 = Math.floor(wl / interval) * interval;
+            for (let wx = x0; wx <= wr + interval; wx += interval) {
+                ctxMap.beginPath();
+                ctxMap.moveTo(wx, wt);
+                ctxMap.lineTo(wx, wb);
+                ctxMap.stroke();
+            }
+            // 横線（緯度方向）
+            const y0 = Math.floor(wt / interval) * interval;
+            for (let wy = y0; wy <= wb + interval; wy += interval) {
+                ctxMap.beginPath();
+                ctxMap.moveTo(wl, wy);
+                ctxMap.lineTo(wr, wy);
+                ctxMap.stroke();
+            }
+
+            ctxMap.setLineDash([]);
+
+            // ラベル（ワールド座標のまま、フォントサイズで補正）
+            const fontSize = Math.max(8, Math.min(11, 9)) / viewState.zoom;
+            ctxMap.fillStyle = '#94a3b8';
+            ctxMap.font = `${fontSize}px sans-serif`;
+
+            // 東西ラベル（X軸: 下端付近）
+            ctxMap.textAlign = 'center';
+            ctxMap.textBaseline = 'top';
+            for (let wx = x0; wx <= wr + interval; wx += interval) {
+                if (wx < wl || wx > wr) continue;
+                const label = wx === 0 ? '0' : (wx > 0 ? 'E' : 'W') + Math.abs(wx).toFixed(0) + 'm';
+                ctxMap.fillText(label, wx, wb - fontSize * 1.4);
+            }
+
+            // 南北ラベル（Y軸: 左端付近）
+            ctxMap.textAlign = 'left';
+            ctxMap.textBaseline = 'middle';
+            for (let wy = y0; wy <= wb + interval; wy += interval) {
+                if (wy < wt || wy > wb) continue;
+                const northVal = -wy; // canvas y は下向きなので反転
+                const label = northVal === 0 ? '0' : (northVal > 0 ? 'N' : 'S') + Math.abs(northVal).toFixed(0) + 'm';
+                ctxMap.fillText(label, wl + fontSize * 0.3, wy);
+            }
+
+            ctxMap.restore();
         }
 
-        function drawElevation() {
-            ctxEle.clearRect(0, 0, canvasEle.clientWidth, canvasEle.clientHeight);
-            if (points.length < 2) return;
+        // スタート／エンドマーカー（ワールド座標）
+        function drawWorldMarker(p, color, label) {
+            const r = 7 / viewState.zoom;
+            const fs = 10 / viewState.zoom;
 
+            ctxMap.beginPath();
+            ctxMap.arc(p.x, p.y, r, 0, Math.PI * 2);
+            ctxMap.fillStyle = color;
+            ctxMap.fill();
+            ctxMap.strokeStyle = 'white';
+            ctxMap.lineWidth = 2 / viewState.zoom;
+            ctxMap.stroke();
+
+            // ラベル
+            ctxMap.font = `bold ${fs}px sans-serif`;
+            ctxMap.fillStyle = '#1e293b';
+            ctxMap.textAlign = 'left';
+            ctxMap.textBaseline = 'bottom';
+            const tw = ctxMap.measureText(label).width;
+            ctxMap.fillStyle = 'rgba(255,255,255,0.85)';
+            ctxMap.fillRect(p.x + r + 1 / viewState.zoom, p.y - fs - 2 / viewState.zoom, tw + 4 / viewState.zoom, fs + 4 / viewState.zoom);
+            ctxMap.fillStyle = '#1e293b';
+            ctxMap.fillText(label, p.x + r + 3 / viewState.zoom, p.y - 1 / viewState.zoom);
+        }
+
+        // 名所マーカー（ワールド座標）
+        function drawLandmarkMarker(lm) {
+            const r = 6 / viewState.zoom;
+            const fs = 9 / viewState.zoom;
+
+            // 紫ピン
+            ctxMap.beginPath();
+            ctxMap.arc(lm.x, lm.y, r, 0, Math.PI * 2);
+            ctxMap.fillStyle = '#7c3aed';
+            ctxMap.fill();
+            ctxMap.strokeStyle = 'white';
+            ctxMap.lineWidth = 1.5 / viewState.zoom;
+            ctxMap.stroke();
+
+            // ラベル
+            ctxMap.font = `bold ${fs}px sans-serif`;
+            const tw = ctxMap.measureText(lm.name).width;
+            const pad = 3 / viewState.zoom;
+            const lx = lm.x + r + pad;
+            const ly = lm.y - fs * 0.5;
+
+            ctxMap.fillStyle = 'rgba(245,243,255,0.92)';
+            ctxMap.fillRect(lx - pad, ly - pad, tw + pad * 2, fs + pad * 2);
+            ctxMap.strokeStyle = '#7c3aed';
+            ctxMap.lineWidth = 0.8 / viewState.zoom;
+            ctxMap.strokeRect(lx - pad, ly - pad, tw + pad * 2, fs + pad * 2);
+
+            ctxMap.fillStyle = '#4c1d95';
+            ctxMap.textAlign = 'left';
+            ctxMap.textBaseline = 'top';
+            ctxMap.fillText(lm.name, lx, ly);
+        }
+
+        // 北方位マーク（スクリーン座標）
+        function drawNorthArrow(w, h) {
+            const cx = w - 38, cy = 44, r = 20;
+
+            ctxMap.save();
+            ctxMap.translate(cx, cy);
+
+            // 背景円
+            ctxMap.beginPath();
+            ctxMap.arc(0, 0, r, 0, Math.PI * 2);
+            ctxMap.fillStyle = 'rgba(255,255,255,0.92)';
+            ctxMap.fill();
+            ctxMap.strokeStyle = '#cbd5e1';
+            ctxMap.lineWidth = 1;
+            ctxMap.stroke();
+
+            // 北向き矢印（青）
+            ctxMap.beginPath();
+            ctxMap.moveTo(0, -r + 5);
+            ctxMap.lineTo(6, 4);
+            ctxMap.lineTo(0, 0);
+            ctxMap.lineTo(-6, 4);
+            ctxMap.closePath();
+            ctxMap.fillStyle = '#1d4ed8';
+            ctxMap.fill();
+
+            // 南向き矢印（赤）
+            ctxMap.beginPath();
+            ctxMap.moveTo(0, r - 5);
+            ctxMap.lineTo(6, -4);
+            ctxMap.lineTo(0, 0);
+            ctxMap.lineTo(-6, -4);
+            ctxMap.closePath();
+            ctxMap.fillStyle = '#dc2626';
+            ctxMap.fill();
+
+            // 中心点
+            ctxMap.beginPath();
+            ctxMap.arc(0, 0, 2.5, 0, Math.PI * 2);
+            ctxMap.fillStyle = '#1e293b';
+            ctxMap.fill();
+
+            // N ラベル
+            ctxMap.font = 'bold 9px sans-serif';
+            ctxMap.fillStyle = '#1d4ed8';
+            ctxMap.textAlign = 'center';
+            ctxMap.textBaseline = 'bottom';
+            ctxMap.fillText('N', 0, -r + 4);
+
+            ctxMap.restore();
+        }
+
+        // スケールバー（スクリーン座標）
+        function drawScaleBar(w, h) {
+            const ppm = viewState.zoom; // pixels per meter
+            const targetPx = 80;
+            const rawMeters = targetPx / ppm;
+            const niceM = niceInterval(rawMeters * 2, 2);
+            const barPx = niceM * ppm;
+            if (barPx < 5 || barPx > w * 0.6) return;
+
+            const x = 20, y = h - 22, barH = 5;
+
+            ctxMap.save();
+
+            // 背景
+            ctxMap.fillStyle = 'rgba(255,255,255,0.88)';
+            ctxMap.fillRect(x - 4, y - 15, barPx + 8, barH + 19);
+
+            // バー（2色交互）
+            ctxMap.fillStyle = '#1e293b';
+            ctxMap.fillRect(x, y, barPx, barH);
+            ctxMap.fillStyle = '#f8fafc';
+            ctxMap.fillRect(x, y, barPx / 2, barH);
+
+            // 目盛り線
+            ctxMap.strokeStyle = '#1e293b';
+            ctxMap.lineWidth = 1;
+            [0, 0.5, 1].forEach(t => {
+                const px = x + t * barPx;
+                ctxMap.beginPath();
+                ctxMap.moveTo(px, y - 3);
+                ctxMap.lineTo(px, y + barH);
+                ctxMap.stroke();
+            });
+
+            // ラベル
+            ctxMap.fillStyle = '#1e293b';
+            ctxMap.font = 'bold 8px sans-serif';
+            ctxMap.textAlign = 'center';
+            ctxMap.textBaseline = 'bottom';
+            ctxMap.fillText('0', x, y - 3);
+            ctxMap.fillText(fmtDist(niceM / 2), x + barPx / 2, y - 3);
+            ctxMap.fillText(fmtDist(niceM), x + barPx, y - 3);
+
+            ctxMap.restore();
+        }
+
+        // ----- 標高プロファイル描画 -----
+        function drawElevation() {
             const w = canvasEle.clientWidth;
             const h = canvasEle.clientHeight;
-            const pad = 40;
-            const rangeZ = Math.max(5, bounds.maxZ - bounds.minZ);
-            const totalD = points[points.length-1].d;
+            const padL = 46, padR = 12, padT = 12, padB = 28;
+
+            ctxEle.clearRect(0, 0, w, h);
+            if (points.length < 2) return;
+
+            const totalD = points[points.length - 1].d;
+            const rangeZ = Math.max(1, bounds.maxZ - bounds.minZ);
+
+            const toX = d => padL + (d / totalD) * (w - padL - padR);
+            const toY = z => (h - padB) - ((z - bounds.minZ) / rangeZ) * (h - padT - padB);
+
+            // グリッド線（Y方向）
+            const zInterval = niceInterval(rangeZ, 4);
+            const zStart = Math.ceil(bounds.minZ / zInterval) * zInterval;
+            ctxEle.strokeStyle = '#f1f5f9';
+            ctxEle.lineWidth = 1;
+            for (let z = zStart; z <= bounds.maxZ; z += zInterval) {
+                ctxEle.beginPath();
+                ctxEle.moveTo(padL, toY(z));
+                ctxEle.lineTo(w - padR, toY(z));
+                ctxEle.stroke();
+            }
+
+            // グリッド線（X方向）
+            const dInterval = niceInterval(totalD, 5);
+            for (let d = 0; d <= totalD; d += dInterval) {
+                ctxEle.beginPath();
+                ctxEle.moveTo(toX(d), padT);
+                ctxEle.lineTo(toX(d), h - padB);
+                ctxEle.stroke();
+            }
 
             // 塗りつぶし
             ctxEle.beginPath();
-            ctxEle.fillStyle = '#f1f5f9';
-            ctxEle.moveTo(pad, h - pad);
-            points.forEach(p => {
-                const x = pad + (p.d / totalD) * (w - pad * 2);
-                const y = (h - pad) - ((p.z - bounds.minZ) / rangeZ) * (h - pad * 2);
-                ctxEle.lineTo(x, y);
-            });
-            ctxEle.lineTo(w - pad, h - pad);
+            ctxEle.fillStyle = '#eff6ff';
+            ctxEle.moveTo(toX(points[0].d), h - padB);
+            points.forEach(p => ctxEle.lineTo(toX(p.d), toY(p.z)));
+            ctxEle.lineTo(toX(points[points.length - 1].d), h - padB);
+            ctxEle.closePath();
             ctxEle.fill();
 
             // 線
             ctxEle.beginPath();
             ctxEle.strokeStyle = '#3b82f6';
-            ctxEle.lineWidth = 3;
+            ctxEle.lineWidth = 2;
+            ctxEle.lineJoin = 'round';
             points.forEach((p, i) => {
-                const x = pad + (p.d / totalD) * (w - pad * 2);
-                const y = (h - pad) - ((p.z - bounds.minZ) / rangeZ) * (h - pad * 2);
-                if (i === 0) ctxEle.moveTo(x, y);
-                else ctxEle.lineTo(x, y);
+                if (i === 0) ctxEle.moveTo(toX(p.d), toY(p.z));
+                else ctxEle.lineTo(toX(p.d), toY(p.z));
             });
             ctxEle.stroke();
+
+            // 軸線
+            ctxEle.strokeStyle = '#cbd5e1';
+            ctxEle.lineWidth = 1;
+            ctxEle.beginPath();
+            ctxEle.moveTo(padL, padT);
+            ctxEle.lineTo(padL, h - padB);
+            ctxEle.lineTo(w - padR, h - padB);
+            ctxEle.stroke();
+
+            // Y軸ラベル（標高）
+            ctxEle.fillStyle = '#64748b';
+            ctxEle.font = '9px sans-serif';
+            ctxEle.textAlign = 'right';
+            ctxEle.textBaseline = 'middle';
+            for (let z = zStart; z <= bounds.maxZ; z += zInterval) {
+                const y2 = toY(z);
+                if (y2 < padT || y2 > h - padB) continue;
+                ctxEle.fillText(`${z.toFixed(1)}m`, padL - 3, y2);
+            }
+
+            // X軸ラベル（距離）
+            ctxEle.textAlign = 'center';
+            ctxEle.textBaseline = 'top';
+            for (let d = 0; d <= totalD + dInterval * 0.1; d += dInterval) {
+                if (d > totalD) break;
+                ctxEle.fillText(fmtDist(d), toX(d), h - padB + 4);
+            }
         }
 
-        // インタラクション (Zoom & Pan)
+        // ===== インタラクション =====
+
+        // マウスホイール（ズーム）
         canvasMap.onwheel = (e) => {
             e.preventDefault();
-            const delta = e.deltaY > 0 ? 0.9 : 1.1;
-            const mouseX = e.offsetX;
-            const mouseY = e.offsetY;
-            
-            // マウス位置を中心にズーム
-            const worldX = (mouseX - viewState.x) / viewState.zoom;
-            const worldY = (mouseY - viewState.y) / viewState.zoom;
-            
+            const delta = e.deltaY > 0 ? 0.88 : 1.14;
+            const mx = e.offsetX, my = e.offsetY;
+            const wx = (mx - viewState.x) / viewState.zoom;
+            const wy = (my - viewState.y) / viewState.zoom;
             viewState.zoom *= delta;
-            viewState.x = mouseX - worldX * viewState.zoom;
-            viewState.y = mouseY - worldY * viewState.zoom;
+            viewState.x = mx - wx * viewState.zoom;
+            viewState.y = my - wy * viewState.zoom;
             draw();
         };
 
+        // マウスドラッグ（パン）
         canvasMap.onmousedown = (e) => {
             viewState.isDragging = true;
             viewState.lastMouse = { x: e.offsetX, y: e.offsetY };
@@ -324,16 +728,66 @@
         window.onmousemove = (e) => {
             if (!viewState.isDragging) return;
             const rect = canvasMap.getBoundingClientRect();
-            const dx = e.clientX - rect.left - viewState.lastMouse.x;
-            const dy = e.clientY - rect.top - viewState.lastMouse.y;
-            viewState.x += dx;
-            viewState.y += dy;
-            viewState.lastMouse = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+            const cx = e.clientX - rect.left;
+            const cy = e.clientY - rect.top;
+            viewState.x += cx - viewState.lastMouse.x;
+            viewState.y += cy - viewState.lastMouse.y;
+            viewState.lastMouse = { x: cx, y: cy };
             draw();
         };
-        window.onmouseup = () => viewState.isDragging = false;
+        window.onmouseup = () => { viewState.isDragging = false; };
 
-        // 画像保存
+        // タッチ（ドラッグ＋ピンチズーム）
+        const activeTouches = {};
+        canvasMap.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            Array.from(e.changedTouches).forEach(t => {
+                activeTouches[t.identifier] = { x: t.clientX, y: t.clientY };
+            });
+        }, { passive: false });
+
+        canvasMap.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            const tArr = Array.from(e.touches);
+            const rect = canvasMap.getBoundingClientRect();
+
+            if (tArr.length === 1) {
+                const t = tArr[0];
+                const prev = activeTouches[t.identifier];
+                if (prev) {
+                    viewState.x += t.clientX - prev.x;
+                    viewState.y += t.clientY - prev.y;
+                    draw();
+                }
+            } else if (tArr.length === 2) {
+                const [t0, t1] = tArr;
+                const p0 = activeTouches[t0.identifier];
+                const p1 = activeTouches[t1.identifier];
+                if (p0 && p1) {
+                    const prevDist = Math.hypot(p0.x - p1.x, p0.y - p1.y);
+                    const currDist = Math.hypot(t0.clientX - t1.clientX, t0.clientY - t1.clientY);
+                    const scale = currDist / (prevDist || 1);
+                    const cx = (t0.clientX + t1.clientX) / 2 - rect.left;
+                    const cy2 = (t0.clientY + t1.clientY) / 2 - rect.top;
+                    const wx = (cx - viewState.x) / viewState.zoom;
+                    const wy = (cy2 - viewState.y) / viewState.zoom;
+                    viewState.zoom *= scale;
+                    viewState.x = cx - wx * viewState.zoom;
+                    viewState.y = cy2 - wy * viewState.zoom;
+                    draw();
+                }
+            }
+
+            Array.from(e.changedTouches).forEach(t => {
+                activeTouches[t.identifier] = { x: t.clientX, y: t.clientY };
+            });
+        }, { passive: false });
+
+        canvasMap.addEventListener('touchend', (e) => {
+            Array.from(e.changedTouches).forEach(t => { delete activeTouches[t.identifier]; });
+        });
+
+        // ===== 画像保存 =====
         document.getElementById('btn-download').onclick = () => {
             const link = document.createElement('a');
             link.download = 'survey_map.png';
